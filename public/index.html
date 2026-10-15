@@ -214,7 +214,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
   <header class="top">
     <div>
       <h1>家庭资产与开销</h1>
-      <p class="sub" id="subline">余额 RM 统一折算。企业账户单独显示，只有提款计入家庭收入。</p>
+      <p class="sub" id="subline">金额统一折算为 RM，企业账户单独显示。</p>
     </div>
     <div class="ctrl">
       <div class="monthnav"><button class="btn" id="mPrev" type="button" aria-label="上一个月">‹</button><label>月份<input id="month" type="month"></label><button class="btn" id="mNext" type="button" aria-label="下一个月">›</button></div>
@@ -1924,8 +1924,7 @@ function renderOverview() {
       var prevNet = sn ? sn.net : (L.netWorthTrend(S.accounts, S.balances, S.rates, [pm])[0] || {}).net;
       return prevNet == null ? '—' : signed(t.net - prevNet);
     })(), '', (S.snapshots[L.addMonths(m, -1)] ? '对比已锁定快照' : '对比上月估算')),
-    card('企业净现金', rm(biz.net), 'biz', '不计入家庭净资产'),
-    card('待录入余额', (t.missing + t.carried) + ' 项', '', t.missing + ' 未录入 · ' + t.carried + ' 沿用旧值')
+    card('企业净现金', rm(biz.net), 'biz', '不计入家庭净资产')
   ].join('');
 
   var emTarget = Number(prefs().emergencyMonths) || 6;
@@ -1992,7 +1991,7 @@ function renderOverview() {
     items.push('<button class="row" data-act="goto" data-id="plan"><span class="n"><b>' + esc(r.title) + '</b><small>' + (over ? '已过期 ' : '') + esc(r.date) + '</small></span><span class="v">›</span></button>');
   });
   $('pending').innerHTML = items.length ? '<ul class="list">' + items.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul>' : '<span class="muted">没有待处理事项。</span>';
-  $('subline').textContent = '余额 RM 统一折算。企业账户单独显示，只有提款计入家庭收入。';
+  $('subline').textContent = (t.missing + t.carried ? '余额待更新 ' + (t.missing + t.carried) + ' 项 · ' : '') + '金额统一折算为 RM，企业账户单独显示。';
 }
 
 // ---------- batch balance update ----------
