@@ -48,6 +48,7 @@ input,select,textarea{font:inherit;color:var(--ink);background:var(--surface);bo
 input[type=checkbox]{width:auto}
 input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .ctrl input{width:auto;min-width:120px}
+.ctrl #rate{min-width:90px;width:110px}
 .tabs{display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--line);margin:4px 0 14px;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
 .tabs button{background:none;border:0;padding:9px 12px;color:var(--muted);font:inherit;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-1px}
@@ -313,6 +314,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
         <label class="row-h" id="rowTo" hidden>转入账户<select id="fTo"></select></label>
         <label class="row-h" id="rowLoan" hidden>还哪笔贷款<select id="fLoan"></select></label>
         <label class="row-h" id="rowRepay" hidden>其中利息（RM）<input id="fInt" type="number" step="0.01" inputmode="decimal" placeholder="0.00"></label>
+        <label class="row-h" id="rowFx" hidden><span id="lblFx">原币金额（SGD）</span><input id="fFx" type="text" inputmode="decimal" placeholder="输入 SGD，自动按本月汇率换算成 RM"></label>
         <label>录入人 / 归属<select id="fMember"></select></label>
         <label class="full">备注<input id="fNote" type="text" maxlength="120" placeholder="例如：Giant 买菜" list="noteList"><datalist id="noteList"></datalist></label>
         <div class="full">
@@ -1344,7 +1346,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     return { current: current, target: target, pct: pct, remaining: Math.max(0, target - current), monthsLeft: monthsLeft, perMonth: perMonth, done: target > 0 && current >= target };
   }
   // Plain-language observations about month m compared with the month before.
-  function insights(tx, m) {
+  function insights(tx, m, opts) {
     var out = [];
     var cur = cashflow(tx, m), prev = cashflow(tx, addMonths(m, -1));
     if (prev.expense > 0 && cur.expense > 0) {
@@ -1356,6 +1358,10 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     if (up) out.push({ kind: 'warn', text: '「' + up.name + '」比上月多花 ' + up.delta.toFixed(2) + '（+' + (up.delta / up.prev * 100).toFixed(0) + '%）' });
     var down = rep.filter(function (r) { return r.prev > 0 && -r.delta / r.prev >= 0.3 && -r.delta >= 50; }).sort(function (a, b) { return a.delta - b.delta; })[0];
     if (down) out.push({ kind: 'ok', text: '「' + down.name + '」比上月少花 ' + (-down.delta).toFixed(2) });
+    (budgetStatus(opts && opts.categories, tx, m) || []).forEach(function (b) {
+      if (b.over) out.push({ kind: 'warn', text: '「' + b.name + '」已超预算 ' + (b.spent - b.budget).toFixed(2) });
+      else if (b.pct >= 0.8) out.push({ kind: 'warn', text: '「' + b.name + '」预算已用 ' + (b.pct * 100).toFixed(0) + '%' });
+    });
     if (cur.savingsRate != null) out.push({ kind: cur.savingsRate >= 0.2 ? 'ok' : 'warn', text: '本月储蓄率 ' + (cur.savingsRate * 100).toFixed(0) + '%' + (cur.savingsRate >= 0.2 ? '，不错' : '，低于 20% 的建议线') });
     if (rep.length) out.push({ kind: 'info', text: '花得最多的是「' + rep[0].name + '」，占支出 ' + (rep[0].pct * 100).toFixed(0) + '%' });
     return out;
@@ -1938,7 +1944,7 @@ function renderOverview() {
       '<div class="muted">' + (bs.daily != null ? '剩余 ' + bs.daysLeft + ' 天，平均每天可花 <b class="num">' + rm(bs.daily) + '</b>' + (bs.paceOk === false ? '，目前花得比进度快' : '，进度正常') : bs.daysLeft === 0 ? '本月已结束' : '') + '</div>';
   } else { $('budgetBox').hidden = true; }
 
-  var ins = L.insights(txs, m);
+  var ins = L.insights(txs, m, { categories: catList('expense') });
   $('insightBox').hidden = !ins.length;
   $('insightBox').innerHTML = '<h2>本月观察</h2><div class="ins">' + ins.map(function (x) { return '<div><i class="' + x.kind + '"></i><span>' + esc(x.text) + '</span></div>'; }).join('') + '</div>';
 
@@ -2259,6 +2265,7 @@ function setEntryType(t) {
   $('rowRepay').hidden = t !== 'repayment';
   $('lblAcc').textContent = t === 'transfer' ? '转出账户' : t === 'income' ? '收入进入账户' : t === 'repayment' ? '从哪个账户付款' : '付款账户';
   $('lblAmt').textContent = t === 'repayment' ? '还款总额（RM）' : '金额（RM）';
+  syncFxRow();
   fillSelect($('fCat'), catOpts(t === 'income' ? 'income' : 'expense'), { keep: true });
   renderChips();
   if (t === 'repayment') loanAutofill();
@@ -2290,7 +2297,7 @@ function loanAutofill() {
 }
 function resetEntry(keepEdit) {
   if (!keepEdit) { S.editTxId = null; }
-  $('fAmt').value = ''; $('fNote').value = ''; $('fInt').value = '';
+  $('fAmt').value = ''; $('fNote').value = ''; $('fInt').value = ''; $('fFx').value = '';
   $('fDate').value = L.todayKuching();
   S.memberDefaulted = false;
   if (!S.editTxId && S.uid && S.members[S.uid]) { $('fMember').value = S.uid; S.memberDefaulted = true; }
@@ -2299,6 +2306,22 @@ function resetEntry(keepEdit) {
   $('fSave').textContent = S.editTxId ? '保存修改' : '保存';
   $('fCancel').hidden = !S.editTxId;
   $('entryHint').textContent = '';
+}
+function fxAccount() {
+  var a = S.accounts[$('fAcc').value];
+  return a && a.currency !== 'MYR' ? a : null;
+}
+function syncFxRow() {
+  var a = fxAccount();
+  $('rowFx').hidden = !a || S.entryType === 'repayment';
+  if (a) $('lblFx').textContent = '原币金额（' + a.currency + '）';
+}
+function fxToRm() {
+  var a = fxAccount(); if (!a) return;
+  var v = L.evalAmount($('fFx').value);
+  if (!isFinite(v)) return;
+  $('fAmt').value = round2(v * L.rateFor(S.rates, S.month));
+  $('entryHint').textContent = a.currency + ' ' + num(v) + ' × ' + L.rateFor(S.rates, S.month) + ' = RM ' + num(Number($('fAmt').value));
 }
 function entryFromForm() {
   var t = S.entryType, amount = L.evalAmount($('fAmt').value);
@@ -2318,6 +2341,8 @@ function entryFromForm() {
     tx.interest = round2(Number($('fInt').value) || 0);
     tx.principal = round2(amount - tx.interest);
   }
+  var fa = fxAccount(), fv = L.evalAmount($('fFx').value);
+  tx.fx = fa && isFinite(fv) && !$('rowFx').hidden ? { currency: fa.currency, amount: fv, rate: L.rateFor(S.rates, S.month) } : null;
   return tx;
 }
 function summaryOf(tx) {
@@ -2435,6 +2460,7 @@ function editTx(id) {
   if (t.category) $('fCat').value = t.category;
   if (t.loanId) $('fLoan').value = t.loanId;
   $('fInt').value = t.type === 'repayment' ? (t.interest || 0) : '';
+  syncFxRow(); $('fFx').value = t.fx && t.fx.amount != null ? t.fx.amount : '';
   $('fMember').value = t.member || 'shared'; S.memberDefaulted = true;
   $('fNote').value = t.note || '';
   setReceipt(null, t.receiptId || null);
@@ -2493,7 +2519,7 @@ function renderLedger() {
       var sign = t.type === 'income' ? '+' : (t.type === 'expense' || t.type === 'repayment') ? '-' : '';
       var cls = t.type === 'income' ? 'pos' : (t.type === 'expense' || t.type === 'repayment') ? 'neg' : '';
       var title = t.type === 'transfer' ? accName(t.account) + ' → ' + accName(t.toAccount) : (t.note || t.category || TYPE_LABEL[t.type]);
-      var sub = TYPE_LABEL[t.type] + (t.category ? ' · ' + t.category : '') + ' · ' + memberName(t.member) + ' · ' + accName(t.account) + (t.source === 'auto' ? ' · 自动入账' : t.source === 'pdf' || t.source === 'csv' ? ' · 账单导入' : '') +
+      var sub = TYPE_LABEL[t.type] + (t.category ? ' · ' + t.category : '') + ' · ' + memberName(t.member) + ' · ' + accName(t.account) + (t.source === 'auto' ? ' · 自动入账' : t.source === 'pdf' || t.source === 'csv' ? ' · 账单导入' : '') + (t.fx && t.fx.amount ? ' · ' + t.fx.currency + ' ' + num(t.fx.amount) : '') +
         (t.type === 'repayment' ? ' · 本金 ' + num(t.principal) + ' / 利息 ' + num(t.interest) : '');
       var armed = S.arm === 'del-tx:' + t.id;
       return '<li class="li"><span class="n"><b>' + esc(title) + '</b><small>' + esc(sub) + '</small></span>' +
@@ -3109,8 +3135,14 @@ function showTab(name) {
   render();
   window.scrollTo(0, 0);
 }
+var renderQueued = false;
 function render() {
   if (!S.ready) return;
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(function () { renderQueued = false; renderNow(); });
+}
+function renderNow() {
   renderHeader();
   fillAll();
   var t = S.tab;
@@ -3247,6 +3279,8 @@ document.addEventListener('click', function (e) {
   render();
 });
 $('fLoan').addEventListener('change', function () { $('fAmt').value = ''; $('fInt').value = ''; loanAutofill(); });
+$('fAcc').addEventListener('change', syncFxRow);
+$('fFx').addEventListener('input', fxToRm);
 $('fCat').addEventListener('change', renderChips);
 $('loginBtn').addEventListener('click', doLogin);
 $('loginKey').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });

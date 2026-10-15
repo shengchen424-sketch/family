@@ -627,7 +627,7 @@
     return { current: current, target: target, pct: pct, remaining: Math.max(0, target - current), monthsLeft: monthsLeft, perMonth: perMonth, done: target > 0 && current >= target };
   }
   // Plain-language observations about month m compared with the month before.
-  function insights(tx, m) {
+  function insights(tx, m, opts) {
     var out = [];
     var cur = cashflow(tx, m), prev = cashflow(tx, addMonths(m, -1));
     if (prev.expense > 0 && cur.expense > 0) {
@@ -639,6 +639,10 @@
     if (up) out.push({ kind: 'warn', text: '「' + up.name + '」比上月多花 ' + up.delta.toFixed(2) + '（+' + (up.delta / up.prev * 100).toFixed(0) + '%）' });
     var down = rep.filter(function (r) { return r.prev > 0 && -r.delta / r.prev >= 0.3 && -r.delta >= 50; }).sort(function (a, b) { return a.delta - b.delta; })[0];
     if (down) out.push({ kind: 'ok', text: '「' + down.name + '」比上月少花 ' + (-down.delta).toFixed(2) });
+    (budgetStatus(opts && opts.categories, tx, m) || []).forEach(function (b) {
+      if (b.over) out.push({ kind: 'warn', text: '「' + b.name + '」已超预算 ' + (b.spent - b.budget).toFixed(2) });
+      else if (b.pct >= 0.8) out.push({ kind: 'warn', text: '「' + b.name + '」预算已用 ' + (b.pct * 100).toFixed(0) + '%' });
+    });
     if (cur.savingsRate != null) out.push({ kind: cur.savingsRate >= 0.2 ? 'ok' : 'warn', text: '本月储蓄率 ' + (cur.savingsRate * 100).toFixed(0) + '%' + (cur.savingsRate >= 0.2 ? '，不错' : '，低于 20% 的建议线') });
     if (rep.length) out.push({ kind: 'info', text: '花得最多的是「' + rep[0].name + '」，占支出 ' + (rep[0].pct * 100).toFixed(0) + '%' });
     return out;

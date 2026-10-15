@@ -377,6 +377,8 @@ t('insights: spend change and category jump', () => {
   assert.ok(ins.some(x => /多 50%/.test(x.text)), JSON.stringify(ins));
   assert.ok(ins.some(x => /饮食.*多花 500/.test(x.text)));
   assert.ok(ins.some(x => /储蓄率 70%/.test(x.text)));
+  const withBudget = L.insights(txs, M, { categories: [{ name: '饮食', type: 'expense', budget: 1000 }] });
+  assert.ok(withBudget.some(x => /饮食.*超预算 500/.test(x.text)));
 });
 t('similar entries detected', () => {
   const txs = [{ id: 'a', type: 'expense', date: M + '-02', amount: 23.5, category: '饮食', account: 'pb-joint' }];
