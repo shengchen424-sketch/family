@@ -11,7 +11,8 @@
       r[fn] = function () {
         var args = Array.prototype.slice.call(arguments);
         var s = ok, b = bad;
-        fetch('/api/' + fn, {
+        var k = new URLSearchParams(location.search).get('k') || '';
+        fetch('/api/' + fn + (k ? '?k=' + encodeURIComponent(k) : ''), {
           method: 'POST', credentials: 'same-origin',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ args: args })

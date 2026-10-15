@@ -166,12 +166,12 @@ async function handle(req, res) {
 
   if (req.method === 'GET' && url.pathname === '/') {
     if (!key) return send(res, 403, '需要访问密钥。请用 ?k=你的密钥 打开。', { 'Content-Type': 'text/plain; charset=utf-8' });
+    // Serve the page straight away and remember the key in a cookie (no redirect: some phone browsers
+    // drop cookies set on a redirect). The page also passes ?k= on API calls, so cookies are optional.
     if (url.searchParams.get('k')) {
-      // remember the key on this device, then drop it from the address bar
-      return send(res, 302, '', {
-        Location: '/',
-        'Set-Cookie': 'k=' + encodeURIComponent(key) + '; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=31536000'
-      });
+      const cookie = 'k=' + encodeURIComponent(key) + '; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=31536000';
+      const page = fs.readFileSync(PAGE, 'utf8');
+      return send(res, 200, page, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Set-Cookie': cookie });
     }
     const html = fs.readFileSync(PAGE, 'utf8');
     return send(res, 200, html, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
