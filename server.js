@@ -308,6 +308,32 @@ function autoSnapshot() {
 setTimeout(autoSnapshot, 5000);
 setInterval(autoSnapshot, 6 * 3600e3).unref();
 
+// ---------- automatic posting of recurring items flagged autoPost (checked hourly) ----------
+function autoPostRecurring() {
+  try {
+    const today = Logic.todayKuching(), m = today.slice(0, 7);
+    const recs = withIds(load('recurring')), txm = load('tx');
+    const txs = Object.keys(txm).map(id => Object.assign({}, txm[id], { id }));
+    const due = Logic.dueAutoPost(Object.keys(recs).map(k => recs[k]), txs, today);
+    if (!due.length) return;
+    serial(() => {
+      const audit = load('audit');
+      due.forEach(it => {
+        const tx = Logic.txFromRecurring(it, m);
+        tx.member = tx.member || 'shared';
+        if (Logic.validateTx(tx)) return;
+        tx.byId = 'auto'; tx.createdAt = tx.updatedAt = new Date().toISOString(); tx.source = 'auto';
+        txm[it.key] = tx;
+        audit['auto-' + it.key] = { at: tx.createdAt, byId: 'auto', action: '自动入账', ref: it.key, summary: (it.rec.name || '') + ' RM ' + tx.amount };
+      });
+      save('tx'); save('audit');
+      console.log('自动入账 ' + due.length + ' 笔');
+    });
+  } catch (e) { console.error('自动入账失败', e); }
+}
+setTimeout(autoPostRecurring, 8000);
+setInterval(autoPostRecurring, 3600e3).unref();
+
 server.listen(PORT, HOST, () => {
   const scheme = (process.env.TLS_CERT && process.env.TLS_KEY) ? 'https' : 'http';
   console.log('家庭资产服务已启动：' + scheme + '://' + HOST + ':' + PORT + '  数据目录：' + DATA_DIR);

@@ -693,6 +693,46 @@
     return rows;
   }
 
+  // ---------- calendar / weeks / auto-post ----------
+  function dayTotals(tx, m) {
+    var out = {};
+    (tx || []).forEach(function (t) {
+      if (t.month !== m || !t.date) return;
+      var o = out[t.date] = out[t.date] || { expense: 0, income: 0, n: 0 };
+      var a = Number(t.amount) || 0;
+      if (t.type === 'expense') o.expense += a;
+      else if (t.type === 'repayment') o.expense += Number(t.interest) || 0;
+      else if (t.type === 'income') o.income += a;
+      o.n++;
+    });
+    return out;
+  }
+  // Weeks (Monday first) covering month m: [[date|null x7], ...]
+  function calendarGrid(m) {
+    var dim = daysInMonth(m), p = m.split('-').map(Number);
+    var first = new Date(Date.UTC(p[0], p[1] - 1, 1)).getUTCDay(); // 0 = Sunday
+    var lead = (first + 6) % 7, cells = [], weeks = [];
+    for (var i = 0; i < lead; i++) cells.push(null);
+    for (var d = 1; d <= dim; d++) cells.push(m + '-' + String(d).padStart(2, '0'));
+    while (cells.length % 7) cells.push(null);
+    for (var w = 0; w < cells.length; w += 7) weeks.push(cells.slice(w, w + 7));
+    return weeks;
+  }
+  function weekSummary(tx, m) {
+    var dt = dayTotals(tx, m);
+    return calendarGrid(m).map(function (w) {
+      var days = w.filter(Boolean), s = { start: days[0], end: days[days.length - 1], expense: 0, income: 0, n: 0 };
+      days.forEach(function (d) { var o = dt[d]; if (o) { s.expense += o.expense; s.income += o.income; s.n += o.n; } });
+      return s;
+    });
+  }
+  // Recurring items flagged autoPost whose date in the current month has arrived and are not yet recorded.
+  function dueAutoPost(recurring, tx, today) {
+    var m = today.slice(0, 7);
+    return recurringForMonth((recurring || []).filter(function (r) { return r.autoPost === true; }), tx, m)
+      .filter(function (it) { return !it.done && it.date <= today; });
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -715,7 +755,8 @@
     monthExpenseByCategory: monthExpenseByCategory, categoryReport: categoryReport, accountFlow: accountFlow, yearSummary: yearSummary,
     topExpenses: topExpenses, frequentCategories: frequentCategories, recentNotes: recentNotes, chartPoints: chartPoints,
     cashEstimate: cashEstimate, budgetSummary: budgetSummary, goalProgress: goalProgress, insights: insights, findSimilar: findSimilar,
-    evalAmount: evalAmount, amortization: amortization
+    evalAmount: evalAmount, amortization: amortization,
+    dayTotals: dayTotals, calendarGrid: calendarGrid, weekSummary: weekSummary, dueAutoPost: dueAutoPost
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;

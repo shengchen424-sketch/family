@@ -411,4 +411,37 @@ t('recurring: a skipped month counts as done', () => {
   assert.strictEqual(L.recurringForMonth(rec, [], '2026-11')[0].done, false);
 });
 
+// 13. Calendar, weeks, auto-post
+t('calendar grid: Monday-first weeks with padding', () => {
+  const g = L.calendarGrid('2026-10'); // 1 Oct 2026 is a Thursday
+  assert.strictEqual(g[0][3], '2026-10-01');
+  assert.strictEqual(g[0][0], null);
+  assert.strictEqual(g[g.length - 1].length, 7);
+  assert.strictEqual(g.flat().filter(Boolean).length, 31);
+});
+t('day and week totals', () => {
+  const txs = [
+    { type: 'expense', month: M, date: '2026-10-01', amount: 10 }, { type: 'expense', month: M, date: '2026-10-02', amount: 20 },
+    { type: 'income', month: M, date: '2026-10-05', amount: 100 }, { type: 'repayment', month: M, date: '2026-10-05', amount: 50, interest: 5 }
+  ];
+  const d = L.dayTotals(txs, M);
+  assert.deepStrictEqual(d['2026-10-05'], { expense: 5, income: 100, n: 2 });
+  const w = L.weekSummary(txs, M);
+  assert.strictEqual(w[0].start, '2026-10-01');
+  assert.strictEqual(w[0].end, '2026-10-04');
+  assert.strictEqual(w[0].expense, 30);
+  assert.strictEqual(w[1].income, 100);
+});
+t('auto-post picks due, unposted, autoPost items only', () => {
+  const rec = [
+    { id: 'a', type: 'expense', amount: 10, dayOfMonth: 5, startMonth: '2026-01', active: true, autoPost: true, category: '饮食' },
+    { id: 'b', type: 'expense', amount: 10, dayOfMonth: 20, startMonth: '2026-01', active: true, autoPost: true, category: '饮食' },
+    { id: 'c', type: 'expense', amount: 10, dayOfMonth: 1, startMonth: '2026-01', active: true, category: '饮食' }
+  ];
+  const due = L.dueAutoPost(rec, [], '2026-10-15');
+  assert.deepStrictEqual(due.map(x => x.rec.id), ['a']);
+  const posted = [L.txFromRecurring(due[0], M)];
+  assert.strictEqual(L.dueAutoPost(rec, posted, '2026-10-15').length, 0);
+});
+
 console.log('\n' + passed + ' tests passed');
