@@ -9,5 +9,5 @@ git reset --hard --quiet origin/main
 python3 scripts/build.py
 node --check server.js
 node tests/logic.test.js >/dev/null
-sudo systemctl restart family-assets
+if [ "$(id -u)" -eq 0 ]; then systemctl restart family-assets; else sudo systemctl restart family-assets; fi
 echo "updated to $(git rev-parse --short HEAD) at $(date '+%F %T')"
