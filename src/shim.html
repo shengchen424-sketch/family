@@ -7,24 +7,41 @@
       withSuccessHandler: function (f) { ok = f; return r; },
       withFailureHandler: function (f) { bad = f; return r; }
     };
-    ['getMe', 'getSnapshot', 'setDoc', 'delDoc', 'uploadReceipt', 'getReceipt'].forEach(function (fn) {
+    ['getMe', 'getSnapshot', 'setDoc', 'delDoc', 'uploadReceipt', 'getReceipt', 'getSeed', 'exportAll', 'importAll'].forEach(function (fn) {
       r[fn] = function () {
         var args = Array.prototype.slice.call(arguments);
         var s = ok, b = bad;
-        var k = new URLSearchParams(location.search).get('k') || '';
+        var k = currentKey();
         fetch('/api/' + fn + (k ? '?k=' + encodeURIComponent(k) : ''), {
           method: 'POST', credentials: 'same-origin',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ args: args })
-        }).then(function (res) { return res.json(); }).then(function (j) {
+        }).then(function (res) {
+          if (res.status === 403) { var e = new Error('未授权'); e.code = 'unauthorized'; throw e; }
+          return res.json();
+        }).then(function (j) {
           if (j.ok) { if (s) s(j.result); }
-          else { if (b) b(new Error(j.error)); }
-        }).catch(function (e) { if (b) b(e); });
+          else { var e2 = new Error(j.error); e2.code = j.code; if (b) b(e2); }
+        }).catch(function (e) { if (b) b(e instanceof Error ? e : new Error('网络错误')); });
         return r;
       };
     });
     return r;
   }
+  // Key: ?k= in the URL is remembered in localStorage (phones drop cookies now and then); the page can also set it.
+  function currentKey() {
+    var q = new URLSearchParams(location.search).get('k') || '';
+    try {
+      if (q) localStorage.setItem('familyKey', q);
+      return q || localStorage.getItem('familyKey') || '';
+    } catch (e) { return q; }
+  }
+  window.FamilyKey = {
+    get: currentKey,
+    set: function (k) { try { localStorage.setItem('familyKey', k); } catch (e) {} },
+    stored: function () { try { return localStorage.getItem('familyKey') || ''; } catch (e) { return ''; } },
+    clear: function () { try { localStorage.removeItem('familyKey'); } catch (e) {} }
+  };
   window.google = { script: { get run() { return runner(); } } };
 })();
 </script>

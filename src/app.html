@@ -127,6 +127,35 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .thumb{max-height:140px;max-width:100%;border-radius:8px;margin-top:6px;border:1px solid var(--line);display:block}
 .thumb[hidden]{display:none}
 .rimg{max-width:100%;max-height:75vh;display:block;margin:0 auto;border-radius:8px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.chips button{font:inherit;font-size:12.5px;border:1px solid var(--line);background:var(--surface2);color:var(--ink);border-radius:999px;padding:4px 10px;cursor:pointer}
+.chips button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.chart{width:100%;height:auto;display:block}
+.chart .ln{fill:none;stroke:var(--accent);stroke-width:2}
+.chart .ar{fill:var(--accent);opacity:.12}
+.chart .dot{fill:var(--accent)}
+.chart .lb{font-size:10px;fill:var(--muted)}
+.chart .gr{stroke:var(--line);stroke-width:1}
+.donut{display:grid;grid-template-columns:120px minmax(0,1fr);gap:12px;align-items:center}
+.donut svg{width:120px;height:120px}
+.legend{display:flex;flex-direction:column;gap:4px;font-size:12.5px;min-width:0}
+.legend span{display:flex;align-items:center;gap:6px;min-width:0}
+.legend i{width:10px;height:10px;border-radius:3px;flex-shrink:0;display:inline-block}
+.legend b{font-variant-numeric:tabular-nums;margin-left:auto;font-weight:500}
+.tbl{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+.tbl th,.tbl td{padding:6px 4px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+.tbl th:first-child,.tbl td:first-child{text-align:left}
+.tbl th{color:var(--muted);font-weight:600;font-size:12px}
+.tbl tr.tot td{font-weight:650;border-bottom:0}
+.login{max-width:420px;margin:40px auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px}
+.login h2{margin-bottom:6px}
+.login p{color:var(--muted);font-size:13px;margin:0 0 14px}
+.kpi{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:6px 0;border-bottom:1px solid var(--line)}
+.kpi:last-child{border-bottom:0}
+.kpi b{font-variant-numeric:tabular-nums;font-weight:600}
+.delta{font-size:11.5px;color:var(--muted)}
+.delta.up{color:var(--neg)}
+.delta.down{color:var(--ok)}
 </style>
 
 <main class="wrap">
@@ -146,11 +175,19 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     <button role="tab" data-tab="balances" aria-selected="false">余额</button>
     <button role="tab" data-tab="entry" aria-selected="false">记账</button>
     <button role="tab" data-tab="ledger" aria-selected="false">流水</button>
+    <button role="tab" data-tab="report" aria-selected="false">报表</button>
     <button role="tab" data-tab="plan" aria-selected="false">预算与定期</button>
     <button role="tab" data-tab="settings" aria-selected="false">导入与设置</button>
   </nav>
 
   <div id="notice" class="notice" hidden></div>
+  <div id="login" class="login" hidden>
+    <h2>输入访问密钥</h2>
+    <p>每位家庭成员有自己的密钥。输入一次后这台手机会记住。</p>
+    <label>密钥<input id="loginKey" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false"></label>
+    <div class="acts" style="margin-top:12px"><button class="btn primary" id="loginBtn">进入</button></div>
+    <div class="muted" id="loginHint" style="margin-top:8px"></div>
+  </div>
 
   <!-- ===== 总览 ===== -->
   <section class="view" id="v-overview">
@@ -162,7 +199,12 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     </div>
     <div class="panel">
       <h2>净资产趋势（近 6 个月）</h2>
+      <div id="trendChart"></div>
       <div id="trend"></div>
+    </div>
+    <div class="panel">
+      <h2>本月支出去向</h2>
+      <div id="ovCats"></div>
     </div>
     <div class="panel">
       <h2>收支（近 6 个月）</h2>
@@ -201,13 +243,13 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       <div class="form">
         <label><span id="lblAmt">金额（RM）</span><input id="fAmt" type="number" step="0.01" inputmode="decimal" placeholder="0.00"></label>
         <label>日期<input id="fDate" type="date"></label>
-        <label id="rowCat">分类<select id="fCat"></select></label>
+        <label id="rowCat">分类<select id="fCat"></select><div class="chips" id="catChips"></div></label>
         <label><span id="lblAcc">付款账户</span><select id="fAcc"></select></label>
         <label class="row-h" id="rowTo" hidden>转入账户<select id="fTo"></select></label>
         <label class="row-h" id="rowLoan" hidden>还哪笔贷款<select id="fLoan"></select></label>
         <label class="row-h" id="rowRepay" hidden>其中利息（RM）<input id="fInt" type="number" step="0.01" inputmode="decimal" placeholder="0.00"></label>
         <label>录入人 / 归属<select id="fMember"></select></label>
-        <label class="full">备注<input id="fNote" type="text" maxlength="120" placeholder="例如：Giant 买菜"></label>
+        <label class="full">备注<input id="fNote" type="text" maxlength="120" placeholder="例如：Giant 买菜" list="noteList"><datalist id="noteList"></datalist></label>
         <div class="full">
           <span class="muted">收据照片（可选）</span>
           <div class="racts">
@@ -239,12 +281,39 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
         <option value="">全部</option><option value="income">收入</option><option value="expense">支出</option>
         <option value="transfer">转账</option><option value="repayment">还款</option></select></label>
       <label>搜索<input id="lQ" type="search" placeholder="备注或分类"></label>
+      <label>分类<select id="lCat"></select></label>
+      <label>账户<select id="lAcc"></select></label>
     </div>
     <div class="bar-row" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
       <span class="muted" id="lSum"></span>
       <button class="btn small" id="exportBtn">导出 CSV</button>
     </div>
     <div id="ledgerList"></div>
+  </section>
+
+  <!-- ===== 报表 ===== -->
+  <section class="view" id="v-report" hidden>
+    <div class="panel">
+      <h2 id="rpTitle">本月分类支出</h2>
+      <div id="rpCats"></div>
+    </div>
+    <div class="panel">
+      <h2>最大的 5 笔支出</h2>
+      <div id="rpTop"></div>
+    </div>
+    <div class="panel">
+      <h2>成员支出</h2>
+      <div id="rpMembers"></div>
+    </div>
+    <div class="panel">
+      <h2>账户进出（本月）</h2>
+      <div id="rpAccounts"></div>
+    </div>
+    <div class="panel">
+      <h2 id="rpYearTitle">年度收支</h2>
+      <div style="overflow-x:auto"><table class="tbl" id="rpYear"></table></div>
+      <div class="acts" style="margin-top:8px"><button class="btn small" id="rpExport">导出本月分类报表 CSV</button></div>
+    </div>
   </section>
 
   <!-- ===== 预算与定期 ===== -->
@@ -305,6 +374,22 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     </div>
 
     <div class="panel">
+      <h2>备份与恢复</h2>
+      <p class="muted">导出全部数据为 JSON 文件（不含收据照片）。恢复时按编号合并：相同编号覆盖，其他保留，不会删除任何记录。</p>
+      <div class="acts" style="justify-content:flex-start">
+        <button class="btn" id="backupBtn">导出全部数据</button>
+        <label class="btn">从备份恢复<input id="restoreFile" type="file" accept=".json,application/json" hidden></label>
+      </div>
+      <div class="muted" id="backupSum" style="margin-top:8px"></div>
+    </div>
+
+    <div class="panel">
+      <h2>安装到手机</h2>
+      <p class="muted" id="installHint">Android Chrome：菜单 → “添加到主屏幕”或“安装应用”。iPhone Safari：分享 → “添加到主屏幕”。安装后像普通 App 一样打开，离线也能打开页面。</p>
+      <div class="acts" style="justify-content:flex-start"><button class="btn" id="installBtn" hidden>安装应用</button><button class="btn" id="logoutBtn">退出（清除这台手机上的密钥）</button></div>
+    </div>
+
+    <div class="panel">
       <h2>修改记录（最近 50 条）</h2>
       <ul class="list" id="auditList"></ul>
     </div>
@@ -338,8 +423,11 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       <button class="btn danger" data-act="deact-acc" id="aDeact">停用账户</button>
       <button class="btn primary" id="aSave">保存</button>
     </div>
+    <div id="aLoanInfo" class="muted" hidden></div>
     <h3>历史记录</h3>
     <ul class="hist" id="aHist"></ul>
+    <h3>本月流水</h3>
+    <ul class="hist" id="aTx"></ul>
   </div>
 </div>
 
@@ -447,7 +535,7 @@ var S = {
   accounts: {}, balances: {}, rates: {}, tx: {}, recurring: {}, categories: {}, members: {}, reminders: {}, snapshots: {}, audit: [],
   month: L.nowMonth(), tab: 'overview',
   entryType: 'expense', editTxId: null, editAccId: null, editRecId: null, editCatId: null, editRemId: null,
-  ledger: { month: '', member: '', type: '', q: '' },
+  ledger: { month: '', member: '', type: '', q: '', cat: '', acc: '' },
   csv: null, pdf: null, pdfRows: null, csvCands: null, arm: null, names: {}, ready: false,
   receipt: { dataUrl: null, fileId: null, removed: false }
 };
@@ -512,6 +600,12 @@ function fillAll() {
   fillSelect($('rLoan'), loanOpts(), { keep: true });
   fillSelect($('rMember'), memberOpts(true), { keep: true });
   fillSelect($('lMember'), [{ value: '', label: '全部成员' }].concat(memberOpts(true)), { keep: true });
+  fillSelect($('lCat'), [{ value: '', label: '全部分类' }].concat(catOpts()), { keep: true });
+  fillSelect($('lAcc'), [{ value: '', label: '全部账户' }].concat(accOpts()), { keep: true });
+  renderChips();
+  var notes = L.recentNotes(txArr(), 30);
+  var nl = notes.map(function (n) { return '<option value="' + esc(n) + '"></option>'; }).join('');
+  if ($('noteList').innerHTML !== nl) $('noteList').innerHTML = nl;
   fillSelect($('iAcc'), accOpts(), { keep: true });
   fillSelect($('iMember'), memberOpts(true), { keep: true });
   fillSelect($('iCatExp'), catOpts('expense'), { keep: true });
@@ -566,6 +660,7 @@ function renderOverview() {
   var months = L.monthRange(m, 6);
   var nw = L.netWorthTrend(S.accounts, S.balances, S.rates, months);
   var maxNet = Math.max.apply(null, [1].concat(nw.map(function (x) { return Math.abs(x.net); })));
+  $('trendChart').innerHTML = nw.length > 1 ? lineChart(nw.map(function (x) { return x.net; }), nw.map(function (x) { return x.month.slice(5); })) : '';
   $('trend').innerHTML = nw.length ? nw.map(function (x) {
     return '<div class="trow"><span>' + x.month + (x.missing ? ' <span class="muted">（' + x.missing + ' 项未录入）</span>' : '') + '</span><span class="v">' + rm(x.net) + '</span>' +
       '<div class="bar-track"><div class="bar-fill" style="width:' + (Math.abs(x.net) / maxNet * 100).toFixed(1) + '%"></div></div></div>';
@@ -578,6 +673,10 @@ function renderOverview() {
       '<div class="bar-track"><div class="bar-fill" style="width:' + (x.income / maxF * 100).toFixed(1) + '%"></div></div>' +
       '<div class="bar-track"><div class="bar-fill over" style="width:' + (x.expense / maxF * 100).toFixed(1) + '%"></div></div></div>';
   }).join('');
+
+  var rep = L.categoryReport(txs, m);
+  $('ovCats').innerHTML = rep.length ? donut(rep.slice(0, 6), rep.reduce(function (a, r) { return a + r.amount; }, 0)) +
+    '<div class="acts" style="margin-top:8px;justify-content:flex-start"><button class="btn small" data-act="goto" data-id="report">查看完整报表 ›</button></div>' : '<span class="muted">本月还没有支出记录。</span>';
 
   var pendingRec = L.recurringForMonth(recArr(), txs, m).filter(function (x) { return !x.done; });
   var today = L.todayKuching(), soon = addDays(today, 7);
@@ -593,6 +692,128 @@ function renderOverview() {
   $('subline').textContent = '余额 RM 统一折算。企业账户单独显示，只有提款计入家庭收入。';
 }
 
+// ---------- charts (inline SVG, no library) ----------
+function lineChart(values, labels) {
+  var w = 320, h = 110, c = L.chartPoints(values, w, h, 14);
+  if (!c.points.length) return '';
+  var pts = c.points.map(function (p) { return p.x.toFixed(1) + ',' + p.y.toFixed(1); }).join(' ');
+  var area = 'M' + c.points[0].x.toFixed(1) + ',' + (h - 14) + ' L' + pts.replace(/ /g, ' L') + ' L' + c.points[c.points.length - 1].x.toFixed(1) + ',' + (h - 14) + ' Z';
+  var fmtK = function (v) { return Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : Math.abs(v) >= 1e3 ? (v / 1e3).toFixed(0) + 'k' : v.toFixed(0); };
+  var dots = c.points.map(function (p) { return '<circle class="dot" cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="2.5"></circle>'; }).join('');
+  var xl = c.points.map(function (p, i) { return '<text class="lb" x="' + p.x.toFixed(1) + '" y="' + (h - 2) + '" text-anchor="middle">' + esc(labels[i]) + '</text>'; }).join('');
+  return '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" role="img" aria-label="净资产趋势">' +
+    '<line class="gr" x1="14" y1="' + (h - 14) + '" x2="' + (w - 14) + '" y2="' + (h - 14) + '"></line>' +
+    '<path class="ar" d="' + area + '"></path><polyline class="ln" points="' + pts + '"></polyline>' + dots + xl +
+    '<text class="lb" x="' + (w - 14) + '" y="10" text-anchor="end">' + fmtK(c.max) + '</text><text class="lb" x="' + (w - 14) + '" y="' + (h - 18) + '" text-anchor="end">' + fmtK(c.min) + '</text></svg>';
+}
+var PALETTE = ['#2d6a4f', '#5a4a8c', '#9a5322', '#1f6f8b', '#a13d3d', '#6b7a2a', '#8a6d3b', '#4a7a8c'];
+function donut(rows, total) {
+  var r = 42, cx = 60, cy = 60, circ = 2 * Math.PI * r, off = 0;
+  var segs = rows.map(function (x, i) {
+    var len = total > 0 ? x.amount / total * circ : 0;
+    var seg = '<circle r="' + r + '" cx="' + cx + '" cy="' + cy + '" fill="none" stroke="' + PALETTE[i % PALETTE.length] + '" stroke-width="16" stroke-dasharray="' + len.toFixed(2) + ' ' + (circ - len).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '" transform="rotate(-90 ' + cx + ' ' + cy + ')"></circle>';
+    off += len; return seg;
+  }).join('');
+  var legend = rows.map(function (x, i) {
+    return '<span><i style="background:' + PALETTE[i % PALETTE.length] + '"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(x.name) + '</span><b>' + num(x.amount) + ' · ' + (x.pct * 100).toFixed(0) + '%</b></span>';
+  }).join('');
+  return '<div class="donut"><svg viewBox="0 0 120 120" role="img" aria-label="分类占比">' + segs +
+    '<text x="60" y="57" text-anchor="middle" style="font-size:9px;fill:var(--muted)">支出</text><text x="60" y="70" text-anchor="middle" style="font-size:10px;font-weight:600;fill:var(--ink)">' + esc(num(total)) + '</text></svg>' +
+    '<div class="legend">' + legend + '</div></div>';
+}
+
+// ---------- report ----------
+function renderReport() {
+  var m = S.month, txs = txArr();
+  $('rpTitle').textContent = m + ' 分类支出';
+  var rep = L.categoryReport(txs, m);
+  var total = rep.reduce(function (a, r) { return a + r.amount; }, 0);
+  $('rpCats').innerHTML = rep.length ? donut(rep.slice(0, 8), total) + '<div style="margin-top:12px">' + rep.map(function (r) {
+    var d = r.prev > 0 ? r.delta / r.prev : null;
+    var dl = r.prev === 0 ? '上月无' : (d > 0 ? '↑' : d < 0 ? '↓' : '') + Math.abs(d * 100).toFixed(0) + '% vs 上月 ' + num(r.prev);
+    return '<div class="trow"><span>' + esc(r.name) + ' <span class="delta ' + (d > 0.05 ? 'up' : d < -0.05 ? 'down' : '') + '">' + esc(dl) + '</span></span><span class="v">' + rm(r.amount) + ' · ' + (r.pct * 100).toFixed(1) + '%</span>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + Math.min(100, r.pct * 100).toFixed(1) + '%"></div></div></div>';
+  }).join('') + '</div>' : '<span class="muted">本月还没有支出记录。</span>';
+
+  $('rpTop').innerHTML = L.topExpenses(txs, m, 5).map(function (t) {
+    return '<div class="kpi"><span>' + esc(t.date.slice(5)) + ' · ' + esc(t.note || t.category) + ' <span class="muted">' + esc(t.category || '') + ' · ' + esc(memberName(t.member)) + '</span></span><b>' + rm(t.amount) + '</b></div>';
+  }).join('') || '<span class="muted">暂无</span>';
+
+  var mem = L.spendByMember(txs, m), mk = Object.keys(mem).sort(function (a, b) { return mem[b] - mem[a]; });
+  var mt = mk.reduce(function (a, k) { return a + mem[k]; }, 0);
+  $('rpMembers').innerHTML = mk.length ? mk.map(function (k) {
+    var p = mt ? mem[k] / mt * 100 : 0;
+    return '<div class="trow"><span>' + esc(memberName(k)) + '</span><span class="v">' + rm(mem[k]) + ' · ' + p.toFixed(0) + '%</span><div class="bar-track"><div class="bar-fill biz" style="width:' + p.toFixed(1) + '%"></div></div></div>';
+  }).join('') : '<span class="muted">暂无</span>';
+
+  var fl = L.accountFlow(txs, m), fk = Object.keys(fl).filter(function (k) { return S.accounts[k]; }).sort(function (a, b) { return (fl[b].in + fl[b].out) - (fl[a].in + fl[a].out); });
+  $('rpAccounts').innerHTML = fk.length ? fk.map(function (k) {
+    return '<div class="kpi"><span>' + esc(accName(k)) + ' <span class="muted">' + fl[k].n + ' 笔</span></span><b><span class="pos">+' + num(fl[k].in) + '</span> / <span class="neg">-' + num(fl[k].out) + '</span></b></div>';
+  }).join('') : '<span class="muted">暂无</span>';
+
+  var year = m.slice(0, 4), ys = L.yearSummary(txs, year);
+  $('rpYearTitle').textContent = year + ' 年收支';
+  $('rpYear').innerHTML = '<tr><th>月份</th><th>收入</th><th>支出</th><th>结余</th><th>储蓄率</th></tr>' + ys.rows.filter(function (r) { return r.income || r.expense; }).map(function (r) {
+    return '<tr><td>' + r.month.slice(5) + ' 月</td><td class="pos">' + num(r.income) + '</td><td class="neg">' + num(r.expense) + '</td><td>' + num(r.net) + '</td><td>' + (r.savingsRate == null ? '—' : (r.savingsRate * 100).toFixed(0) + '%') + '</td></tr>';
+  }).join('') + '<tr class="tot"><td>全年</td><td class="pos">' + num(ys.total.income) + '</td><td class="neg">' + num(ys.total.expense) + '</td><td>' + num(ys.total.net) + '</td><td>' + (ys.total.savingsRate == null ? '—' : (ys.total.savingsRate * 100).toFixed(0) + '%') + '</td></tr>';
+}
+function exportReport() {
+  var rep = L.categoryReport(txArr(), S.month);
+  var csv = L.toCSV(rep, [
+    { label: '分类', get: function (r) { return r.name; } }, { label: '本月RM', get: function (r) { return r.amount.toFixed(2); } },
+    { label: '上月RM', get: function (r) { return r.prev.toFixed(2); } }, { label: '占比%', get: function (r) { return (r.pct * 100).toFixed(1); } }
+  ]);
+  if (!S.downloads) return toast('当前视图不支持导出');
+  S.downloads.save({ filename: 'report-' + S.month + '.csv', data: csv }).catch(function () { toast('导出已取消'); });
+}
+
+// ---------- backup / restore ----------
+async function backupAll() {
+  try {
+    var data = await window.Api.call('exportAll');
+    var json = JSON.stringify({ app: 'family-assets', exportedAt: new Date().toISOString(), data: data }, null, 1);
+    var blob = new Blob([json], { type: 'application/json' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'family-backup-' + L.todayKuching() + '.json';
+    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    var n = Object.keys(data).reduce(function (s, k) { return s + data[k].length; }, 0);
+    $('backupSum').textContent = '已导出 ' + n + ' 条记录。';
+  } catch (e) { toast(errText(e)); }
+}
+function restoreBackup(e) {
+  var f = e.target.files && e.target.files[0]; if (!f) return;
+  var reader = new FileReader();
+  reader.onload = async function () {
+    try {
+      var j = JSON.parse(reader.result);
+      var data = j && j.data ? j.data : j;
+      var n = Object.keys(data).reduce(function (s, k) { return s + (Array.isArray(data[k]) ? data[k].length : 0); }, 0);
+      if (!n) return toast('备份文件里没有记录');
+      if (!confirm('将合并 ' + n + ' 条记录到当前数据（相同编号覆盖，不删除）。继续？')) return;
+      var r = await window.Api.call('importAll', data);
+      audit('恢复备份', f.name, r.imported + ' 条');
+      $('backupSum').textContent = '已恢复 ' + r.imported + ' 条记录。';
+      window.Api.refresh();
+      toast('已恢复');
+    } catch (err) { toast('恢复失败：' + (err && err.message || '')); }
+    e.target.value = '';
+  };
+  reader.readAsText(f);
+}
+
+// ---------- login ----------
+function showLogin(msg) {
+  $('notice').hidden = true;
+  $('login').hidden = false;
+  $('loginHint').textContent = msg || '';
+  setTimeout(function () { $('loginKey').focus(); }, 50);
+}
+function doLogin() {
+  var k = $('loginKey').value.trim();
+  if (!k) return toast('请输入密钥');
+  if (window.FamilyKey) window.FamilyKey.set(k);
+  location.href = '/?k=' + encodeURIComponent(k);
+}
+
 // ---------- balances ----------
 function renderBalances() {
   var m = S.month, txs = txArr();
@@ -605,6 +826,10 @@ function renderBalances() {
     if (a.kind === 'liability' && r.amount != null && a.group === 'family') {
       var lb = L.loanBalance(a, S.balances, txs, m);
       if (lb.paid > 0) sub += ' · 估算余额 ' + num(lb.estimate) + '（已还本金 ' + num(lb.paid) + '）';
+      if (a.monthlyPayment > 0) {
+        var nm = L.monthsToPayoff(lb.estimate != null ? lb.estimate : r.amount, a.rate || 0, a.monthlyPayment);
+        sub += nm == null ? ' · 月供不够付利息' : ' · 约 ' + nm + ' 个月还清';
+      }
     }
     return '<li><button class="row" data-act="open-acc" data-id="' + esc(a.id) + '"><span class="n"><b>' + esc(a.name) + '</b><small>' + esc(sub) + '</small></span>' +
       '<span class="v"><b>' + val + '</b><span class="st ' + r.status + '">' + esc(label) + '</span></span></button></li>';
@@ -630,6 +855,33 @@ function setEntryType(t) {
   $('lblAcc').textContent = t === 'transfer' ? '转出账户' : t === 'income' ? '收入进入账户' : t === 'repayment' ? '从哪个账户付款' : '付款账户';
   $('lblAmt').textContent = t === 'repayment' ? '还款总额（RM）' : '金额（RM）';
   fillSelect($('fCat'), catOpts(t === 'income' ? 'income' : 'expense'), { keep: true });
+  renderChips();
+  if (t === 'repayment') loanAutofill();
+}
+// Quick-pick chips: the categories used most often for this type.
+function renderChips() {
+  var t = S.entryType;
+  if (!(t === 'income' || t === 'expense')) { $('catChips').innerHTML = ''; return; }
+  var names = L.frequentCategories(txArr(), t, 6);
+  if (!names.length) names = catList(t).slice(0, 6).map(function (c) { return c.name; });
+  var cur = $('fCat').value;
+  var html = names.map(function (n) { return '<button type="button" data-chip="' + esc(n) + '" aria-pressed="' + (n === cur) + '">' + esc(n) + '</button>'; }).join('');
+  if ($('catChips').innerHTML !== html) $('catChips').innerHTML = html;
+}
+// Repayment: prefill the monthly payment and interest from what we know about the loan.
+function loanAutofill() {
+  var loan = S.accounts[$('fLoan').value];
+  if (!loan || S.editTxId) return;
+  var lb = L.loanBalance(loan, S.balances, txArr(), S.month);
+  var bal = lb.estimate != null ? lb.estimate : null;
+  var hint = [];
+  if (loan.monthlyPayment > 0 && !$('fAmt').value) $('fAmt').value = loan.monthlyPayment;
+  if (bal != null && loan.rate > 0) {
+    var it = L.estimateInterest(bal, loan.rate);
+    if (!$('fInt').value) $('fInt').value = it;
+    hint.push('按余额 ' + rm(bal) + ' × 年利率 ' + loan.rate + '% 估算本月利息 ' + rm(it) + '，以银行实际数为准。');
+  } else if (bal != null) hint.push('当前估算余额 ' + rm(bal) + '。在「余额」里填上年利率和月供后，这里会自动算利息。');
+  $('entryHint').textContent = hint.join(' ');
 }
 function resetEntry(keepEdit) {
   if (!keepEdit) { S.editTxId = null; }
@@ -800,6 +1052,8 @@ function renderLedger() {
     if (f.month && t.month !== f.month) return false;
     if (f.member && t.member !== f.member) return false;
     if (f.type && t.type !== f.type) return false;
+    if (f.cat && t.category !== f.cat) return false;
+    if (f.acc && t.account !== f.acc && t.toAccount !== f.acc) return false;
     if (f.q) {
       var q = f.q.toLowerCase();
       if (((t.note || '') + ' ' + (t.category || '')).toLowerCase().indexOf(q) < 0) return false;
@@ -836,7 +1090,7 @@ function renderLedger() {
 function exportCSV() {
   var rows = txArr().sort(function (a, b) { return (a.date || '').localeCompare(b.date || ''); });
   var f = S.ledger;
-  rows = rows.filter(function (t) { return (!f.month || t.month === f.month) && (!f.member || t.member === f.member) && (!f.type || t.type === f.type); });
+  rows = rows.filter(function (t) { return (!f.month || t.month === f.month) && (!f.member || t.member === f.member) && (!f.type || t.type === f.type) && (!f.cat || t.category === f.cat) && (!f.acc || t.account === f.acc || t.toAccount === f.acc); });
   var cols = [
     { label: '日期', get: function (r) { return r.date; } },
     { label: '类型', get: function (r) { return TYPE_LABEL[r.type]; } },
@@ -1035,6 +1289,25 @@ function openAcc(id) {
   $('aHist').innerHTML = hist.map(function (x) {
     return '<li><span>' + esc(x.month) + ' · ' + esc(a.currency + ' ' + num(x.amount)) + (x.note ? ' · ' + esc(x.note) : '') + '</span><span>' + esc(x.asOf || '') + '</span></li>';
   }).join('') || '<li><span class="muted">暂无记录</span></li>';
+  var txs = txArr();
+  if (a.kind === 'liability' && b) {
+    var lb = L.loanBalance(a, S.balances, txs, S.month);
+    var parts = ['估算余额 ' + rm(lb.estimate != null ? lb.estimate : b.amount) + (lb.paid ? '（' + lb.asOf + ' 之后已还本金 ' + num(lb.paid) + '）' : '')];
+    if (a.monthlyPayment > 0) {
+      var nm = L.monthsToPayoff(lb.estimate != null ? lb.estimate : b.amount, a.rate || 0, a.monthlyPayment);
+      var ti = L.totalInterestToPayoff(lb.estimate != null ? lb.estimate : b.amount, a.rate || 0, a.monthlyPayment);
+      parts.push(nm == null ? '月供低于利息，无法还清' : '按月供 ' + rm(a.monthlyPayment) + (a.rate ? '、年利率 ' + a.rate + '%' : '') + ' 约 ' + nm + ' 个月（' + L.addMonths(S.month, nm) + '）还清' + (ti != null ? '，剩余利息约 ' + rm(ti) : ''));
+      if (a.settlementQuote > 0) parts.push('银行结清报价 ' + rm(a.settlementQuote) + (ti != null ? '，比继续供省 ' + rm(Math.max(0, (lb.estimate != null ? lb.estimate : b.amount) + ti - a.settlementQuote)) : ''));
+    }
+    $('aLoanInfo').textContent = parts.join('。') + '。'; $('aLoanInfo').hidden = false;
+  } else $('aLoanInfo').hidden = true;
+  var mine = txs.filter(function (t) { return t.month === S.month && (t.account === id || t.toAccount === id || t.loanId === id); })
+    .sort(function (x, y) { return (y.date || '').localeCompare(x.date || ''); }).slice(0, 15);
+  $('aTx').innerHTML = mine.map(function (t) {
+    var inn = (t.type === 'income' && t.account === id) || (t.type === 'transfer' && t.toAccount === id);
+    var amt = t.loanId === id && t.type === 'repayment' ? t.principal : t.amount;
+    return '<li><span>' + esc(t.date.slice(5)) + ' · ' + esc(t.type === 'transfer' ? accName(t.account) + ' → ' + accName(t.toAccount) : (t.note || t.category || TYPE_LABEL[t.type])) + '</span><span class="' + (inn || t.loanId === id ? 'pos' : 'neg') + '">' + (inn ? '+' : '-') + num(amt) + '</span></li>';
+  }).join('') || '<li><span class="muted">本月没有流水</span></li>';
   $('accSheet').hidden = false;
 }
 async function saveAcc() {
@@ -1101,7 +1374,7 @@ async function lockSnapshot(btn) {
   } catch (e) { toast(errText(e)); }
 }
 function renderSettings() {
-  $('seedPanel').hidden = Object.keys(S.accounts).length > 0 || !window.SEED_ACCOUNTS;
+  $('seedPanel').hidden = Object.keys(S.accounts).length > 0;
   $('lockBtn').textContent = '锁定 ' + S.month + ' 快照';
   $('lockBtn').classList.toggle('armed', S.arm === 'lock');
   var snaps = arr(S.snapshots).sort(function (a, b) { return b.id.localeCompare(a.id); });
@@ -1127,24 +1400,26 @@ var SEED_CATEGORIES = [
 ];
 async function seedData(btn) {
   if (Object.keys(S.accounts).length) return toast('已经有账户了，不再导入');
-  if (!window.SEED_ACCOUNTS) return toast('没有找到期初数据');
   if (S.arm !== 'seed') { S.arm = 'seed'; btn.textContent = '再点确认导入'; btn.classList.add('armed'); setTimeout(function () { if (S.arm === 'seed') { S.arm = null; btn.textContent = '导入期初数据（2026-10）'; btn.classList.remove('armed'); } }, 4000); return; }
   S.arm = null; btn.disabled = true; btn.textContent = '正在导入…';
-  var m = window.SEED_MONTH || '2026-10', now = new Date().toISOString();
+  var now = new Date().toISOString();
   try {
+    var seed = await window.Api.call('getSeed');
+    if (!seed || !seed.accounts || !seed.accounts.length) throw new Error('没有找到期初数据');
+    var m = seed.month || '2026-10';
     var jobs = [];
-    window.SEED_ACCOUNTS.forEach(function (a) {
+    seed.accounts.forEach(function (a) {
       jobs.push(S.db.collection('accounts').doc(a.id).set({ name: a.name, kind: a.kind, group: a.group, category: a.category, currency: a.currency, sort: a.sort, active: true }));
       if (a.amount !== null) jobs.push(S.db.collection('balances').doc(m + '__' + a.id).set({ month: m, asOf: m + '-01', accountId: a.id, amount: a.amount, currency: a.currency, note: '期初导入', byId: S.uid, updatedAt: now }));
     });
-    jobs.push(S.db.collection('rates').doc(m).set({ sgdMyr: window.SEED_RATE || L.DEFAULT_RATE, updatedAt: now }));
+    jobs.push(S.db.collection('rates').doc(m).set({ sgdMyr: seed.rate || L.DEFAULT_RATE, updatedAt: now }));
     [['Chen', 1], ['Liza', 2], ['Uning', 3]].forEach(function (x) { jobs.push(S.db.collection('members').doc(x[0]).set({ name: x[0], sort: x[1] })); });
     SEED_CATEGORIES.forEach(function (c, i) { jobs.push(S.db.collection('categories').doc('c-' + (i + 1)).set({ name: c[0], type: c[1], budget: 0, sort: i + 1 })); });
     for (var i = 0; i < jobs.length; i += 8) await Promise.all(jobs.slice(i, i + 8));
-    audit('导入期初数据', m, window.SEED_ACCOUNTS.length + ' 个账户');
+    audit('导入期初数据', m, seed.accounts.length + ' 个账户');
     toast('期初数据已导入');
     showTab('balances');
-  } catch (e) { toast(errText(e)); }
+  } catch (e) { toast(e && e.message && /期初/.test(e.message) ? e.message : errText(e)); }
   finally { btn.disabled = false; btn.textContent = '导入期初数据（2026-10）'; btn.classList.remove('armed'); }
 }
 
@@ -1328,6 +1603,7 @@ function render() {
   if (t === 'balances') renderBalances();
   if (t === 'entry') renderRecent();
   if (t === 'ledger') renderLedger();
+  if (t === 'report') renderReport();
   if (t === 'plan') renderPlan();
   if (t === 'settings') renderSettings();
   if (t !== 'overview') { /* overview also shown in header cards */ }
@@ -1348,6 +1624,8 @@ async function fillNames() {
 
 // ---------- events ----------
 document.addEventListener('click', function (e) {
+  var chip = e.target.closest('#catChips [data-chip]');
+  if (chip) { $('fCat').value = chip.dataset.chip; renderChips(); return; }
   var tabBtn = e.target.closest('[data-tab]');
   if (tabBtn) return showTab(tabBtn.dataset.tab);
   var typeBtn = e.target.closest('#typeSeg [data-type]');
@@ -1417,12 +1695,24 @@ $('rType').addEventListener('change', syncRecForm);
 $('rDel').addEventListener('click', function () { if (S.editRecId) armOrRun('del-rec:' + S.editRecId, async function () { await S.db.collection('recurring').doc(S.editRecId).delete(); audit('删除定期项目', S.editRecId, ''); closeSheets(); toast('已删除'); }); });
 $('cSave').addEventListener('click', saveCat);
 $('mSave').addEventListener('click', saveRem);
-['lMonth', 'lMember', 'lType', 'lQ'].forEach(function (id) {
+['lMonth', 'lMember', 'lType', 'lQ', 'lCat', 'lAcc'].forEach(function (id) {
   $(id).addEventListener('input', function () {
-    S.ledger = { month: $('lMonth').value, member: $('lMember').value, type: $('lType').value, q: $('lQ').value.trim() };
+    S.ledger = { month: $('lMonth').value, member: $('lMember').value, type: $('lType').value, q: $('lQ').value.trim(), cat: $('lCat').value, acc: $('lAcc').value };
     render();
   });
 });
+$('fLoan').addEventListener('change', function () { $('fAmt').value = ''; $('fInt').value = ''; loanAutofill(); });
+$('fCat').addEventListener('change', renderChips);
+$('loginBtn').addEventListener('click', doLogin);
+$('loginKey').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
+$('logoutBtn').addEventListener('click', function () { if (window.FamilyKey) window.FamilyKey.clear(); document.cookie = 'k=; Path=/; Max-Age=0'; location.href = '/'; });
+$('backupBtn').addEventListener('click', backupAll);
+$('restoreFile').addEventListener('change', restoreBackup);
+$('rpExport').addEventListener('click', exportReport);
+var deferredInstall = null;
+window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferredInstall = e; $('installBtn').hidden = false; });
+$('installBtn').addEventListener('click', function () { if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; $('installBtn').hidden = true; } });
+if ('serviceWorker' in navigator && location.protocol === 'https:') { navigator.serviceWorker.register('/sw.js').catch(function () {}); }
 $('exportBtn').addEventListener('click', exportCSV);
 $('month').addEventListener('change', function (e) { if (e.target.value) { S.month = e.target.value; render(); } });
 $('rate').addEventListener('change', function (e) {
@@ -1451,10 +1741,18 @@ async function init() {
   try { user = await window.claude.use('user'); } catch (e) {}
   try { dl = await window.claude.use('downloads'); } catch (e) {}
   if (!db) {
-    $('notice').innerHTML = '<b>无法读取数据</b><br>' + esc(dbErr && dbErr.message ? dbErr.message : '请用带密钥的链接重新打开页面。') +
+    if (dbErr && (dbErr.code === 'unauthorized' || /未授权/.test(dbErr.message || ''))) {
+      var had = window.FamilyKey && window.FamilyKey.get();
+      if (window.FamilyKey) window.FamilyKey.clear();
+      return showLogin(had ? '密钥无效或已更换，请重新输入。' : '');
+    }
+    $('notice').innerHTML = '<b>无法读取数据</b><br>' + esc(dbErr && dbErr.message ? dbErr.message : '请检查网络后重试。') +
       '<br><button class="btn" type="button" style="margin-top:10px" onclick="location.reload()">重试</button>';
     return;
   }
+  // drop ?k= from the address bar once this phone has the key stored (keeps the key out of screenshots and history)
+  var urlKey = new URLSearchParams(location.search).get('k');
+  if (urlKey && window.FamilyKey && window.FamilyKey.stored() === urlKey && history.replaceState) history.replaceState(null, '', '/');
   $('notice').hidden = true;
   S.db = db; S.user = user; S.downloads = dl;
   try { S.uid = user ? await user.id() : null; } catch (e) {}

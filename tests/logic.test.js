@@ -283,4 +283,56 @@ t('PDF: duplicates against existing transactions are skipped via importKey', () 
   assert.strictEqual(d.dup.length, 1);
 });
 
+// 9. Loan helpers
+t('loan: monthly interest estimate and months to payoff', () => {
+  assert.strictEqual(L.estimateInterest(58971, 4.5), 221.14);
+  assert.strictEqual(L.estimateInterest(0, 4.5), 0);
+  assert.strictEqual(L.monthsToPayoff(1200, 0, 100), 12);
+  const n = L.monthsToPayoff(58971, 4.5, 1000);
+  assert.ok(n > 59 && n < 70, 'months ' + n);
+  assert.strictEqual(L.monthsToPayoff(100000, 12, 500), null, 'payment below interest never clears');
+  assert.ok(L.totalInterestToPayoff(58971, 4.5, 1000) > 5000);
+});
+// 10. Reports
+const rtx = [
+  { type: 'expense', month: M, amount: 300, category: '饮食', account: 'pb-joint', date: M + '-02', note: 'Giant' },
+  { type: 'expense', month: M, amount: 100, category: '交通与油费', account: 'pb-joint', date: M + '-03', note: 'Petrol' },
+  { type: 'expense', month: '2026-09', amount: 250, category: '饮食', account: 'pb-joint', date: '2026-09-02', note: 'Giant' },
+  { type: 'income', month: M, amount: 8000, category: '工资', account: 'hlb-liza', date: M + '-01', note: 'Gaji' },
+  { type: 'transfer', month: M, amount: 3000, account: 'hlb-liza', toAccount: 'pb-joint', date: M + '-03' },
+  { type: 'repayment', month: M, amount: 1000, principal: 700, interest: 300, loanId: 'loan-house', account: 'pb-joint', date: M + '-05' }
+];
+t('category report: sorted, share of total, compared with last month, loan interest included', () => {
+  const r = L.categoryReport(rtx, M);
+  assert.deepStrictEqual(r.map(x => x.name), ['饮食', '贷款利息', '交通与油费']);
+  assert.strictEqual(r[0].prev, 250);
+  assert.strictEqual(r[0].delta, 50);
+  assert.ok(Math.abs(r[0].pct - 300 / 700) < 1e-9);
+});
+t('account flow: income in, expense/repayment out, transfers on both sides', () => {
+  const f = L.accountFlow(rtx, M);
+  assert.deepStrictEqual(f['hlb-liza'], { in: 8000, out: 3000, n: 2 });
+  assert.deepStrictEqual(f['pb-joint'], { in: 3000, out: 1400, n: 4 });
+});
+t('year summary: 12 rows with totals', () => {
+  const y = L.yearSummary(rtx, 2026);
+  assert.strictEqual(y.rows.length, 12);
+  assert.strictEqual(y.total.income, 8000);
+  assert.strictEqual(y.total.expense, 950);
+  assert.strictEqual(y.rows[9].net, 8000 - 700);
+});
+t('frequent categories and recent notes', () => {
+  assert.deepStrictEqual(L.frequentCategories(rtx, 'expense', 5), ['饮食', '交通与油费']);
+  assert.deepStrictEqual(L.recentNotes(rtx, 10), ['Petrol', 'Giant', 'Gaji']);
+  assert.strictEqual(L.topExpenses(rtx, M, 1)[0].amount, 300);
+});
+t('chart points scale into the box', () => {
+  const c = L.chartPoints([10, 20, 30], 100, 50, 5);
+  assert.strictEqual(c.points.length, 3);
+  assert.strictEqual(c.points[0].x, 5);
+  assert.strictEqual(c.points[2].x, 95);
+  assert.strictEqual(c.points[2].y, 5);
+  assert.strictEqual(c.points[0].y, 45);
+});
+
 console.log('\n' + passed + ' tests passed');

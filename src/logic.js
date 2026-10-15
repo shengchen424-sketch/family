@@ -476,6 +476,109 @@
     return Object.assign({}, r, { signed: signed, type: signed < 0 ? 'expense' : 'income', sure: true, importKey: importKey(r.date, signed, r.desc) });
   }
 
+  // ---------- loans: payment helpers ----------
+  function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+  // Interest for one month on `balance` at `annualRatePct` (flat monthly accrual, as banks show on statements).
+  function estimateInterest(balance, annualRatePct) {
+    var b = Number(balance), r = Number(annualRatePct);
+    if (!(b > 0) || !(r > 0)) return 0;
+    return round2(b * r / 100 / 12);
+  }
+  // Months until a reducing-balance loan is cleared with a fixed monthly payment. null when payment cannot cover interest.
+  function monthsToPayoff(balance, annualRatePct, payment) {
+    var b = Number(balance), r = (Number(annualRatePct) || 0) / 100 / 12, p = Number(payment);
+    if (!(b > 0)) return 0;
+    if (!(p > 0)) return null;
+    if (r <= 0) return Math.ceil(b / p);
+    if (p <= b * r) return null;
+    return Math.ceil(Math.log(p / (p - b * r)) / Math.log(1 + r));
+  }
+  function totalInterestToPayoff(balance, annualRatePct, payment) {
+    var n = monthsToPayoff(balance, annualRatePct, payment);
+    if (n == null) return null;
+    var b = Number(balance), r = (Number(annualRatePct) || 0) / 100 / 12, p = Number(payment), total = 0;
+    for (var i = 0; i < n && b > 0; i++) { var it = round2(b * r); total += it; b = b + it - p; }
+    return round2(total);
+  }
+
+  // ---------- reports ----------
+  function monthExpenseByCategory(tx, m) {
+    var out = {};
+    (tx || []).forEach(function (t) {
+      if (t.month !== m) return;
+      if (t.type === 'expense') { var c = t.category || '未分类'; out[c] = (out[c] || 0) + (Number(t.amount) || 0); }
+      else if (t.type === 'repayment' && Number(t.interest) > 0) out['贷款利息'] = (out['贷款利息'] || 0) + Number(t.interest);
+    });
+    return out;
+  }
+  // Category spend for month m with the previous month for comparison; sorted by amount desc.
+  function categoryReport(tx, m) {
+    var cur = monthExpenseByCategory(tx, m), prev = monthExpenseByCategory(tx, addMonths(m, -1));
+    var total = 0; Object.keys(cur).forEach(function (k) { total += cur[k]; });
+    return Object.keys(cur).map(function (k) {
+      return { name: k, amount: cur[k], prev: prev[k] || 0, pct: total > 0 ? cur[k] / total : 0, delta: cur[k] - (prev[k] || 0) };
+    }).sort(function (a, b) { return b.amount - a.amount; });
+  }
+  // Money in / out per account for month m (transfers count on both sides; repayments leave the paying account).
+  function accountFlow(tx, m) {
+    var out = {};
+    function add(acc, inn, outt) { if (!acc) return; var o = out[acc] = out[acc] || { in: 0, out: 0, n: 0 }; o.in += inn; o.out += outt; o.n++; }
+    (tx || []).forEach(function (t) {
+      if (t.month !== m) return;
+      var a = Number(t.amount) || 0;
+      if (t.type === 'income') add(t.account, a, 0);
+      else if (t.type === 'expense' || t.type === 'repayment') add(t.account, 0, a);
+      else if (t.type === 'transfer') { add(t.account, 0, a); add(t.toAccount, a, 0); }
+    });
+    return out;
+  }
+  function yearSummary(tx, year) {
+    var rows = [];
+    for (var i = 1; i <= 12; i++) {
+      var m = year + '-' + String(i).padStart(2, '0');
+      var c = cashflow(tx, m);
+      rows.push({ month: m, income: c.income, expense: c.expense, net: c.net, savingsRate: c.savingsRate });
+    }
+    var tot = rows.reduce(function (s, r) { s.income += r.income; s.expense += r.expense; return s; }, { income: 0, expense: 0 });
+    tot.net = tot.income - tot.expense; tot.savingsRate = tot.income > 0 ? tot.net / tot.income : null;
+    return { rows: rows, total: tot };
+  }
+  function topExpenses(tx, m, n) {
+    return (tx || []).filter(function (t) { return t.month === m && t.type === 'expense'; })
+      .sort(function (a, b) { return (Number(b.amount) || 0) - (Number(a.amount) || 0); }).slice(0, n || 5);
+  }
+  // Most used categories for a type (by count over the last 3 months, ties by recency).
+  function frequentCategories(tx, type, n) {
+    var cnt = {};
+    (tx || []).forEach(function (t) { if (t.type === type && t.category) cnt[t.category] = (cnt[t.category] || 0) + 1; });
+    return Object.keys(cnt).sort(function (a, b) { return cnt[b] - cnt[a] || a.localeCompare(b); }).slice(0, n || 6);
+  }
+  function recentNotes(tx, n) {
+    var seen = {}, out = [];
+    (tx || []).slice().sort(function (a, b) { return (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || ''); })
+      .forEach(function (t) {
+        var k = normalizeText(t.note);
+        if (!k || seen[k]) return;
+        seen[k] = true; out.push(t.note.trim());
+      });
+    return out.slice(0, n || 30);
+  }
+  // Points for a simple SVG line: [{x,y}] in 0..w / 0..h with padding, plus min/max for labels.
+  function chartPoints(values, w, h, pad) {
+    pad = pad || 6;
+    var vs = values.map(Number);
+    var min = Math.min.apply(null, vs), max = Math.max.apply(null, vs);
+    if (!isFinite(min) || !isFinite(max)) return { points: [], min: 0, max: 0 };
+    if (max === min) { max += 1; min -= 1; }
+    var n = vs.length;
+    return {
+      min: min, max: max,
+      points: vs.map(function (v, i) {
+        return { x: n > 1 ? pad + (w - 2 * pad) * i / (n - 1) : w / 2, y: pad + (h - 2 * pad) * (1 - (v - min) / (max - min)) };
+      })
+    };
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -493,7 +596,10 @@
     parseCSV: parseCSV, parseAmount: parseAmount, importKey: importKey, mapRows: mapRows,
     dedupe: dedupe, toCSV: toCSV,
     linesFromItems: linesFromItems, leadingDate: leadingDate, trailingMoney: trailingMoney, guessYear: guessYear,
-    parseStatement: parseStatement, flipRow: flipRow
+    parseStatement: parseStatement, flipRow: flipRow,
+    round2: round2, estimateInterest: estimateInterest, monthsToPayoff: monthsToPayoff, totalInterestToPayoff: totalInterestToPayoff,
+    monthExpenseByCategory: monthExpenseByCategory, categoryReport: categoryReport, accountFlow: accountFlow, yearSummary: yearSummary,
+    topExpenses: topExpenses, frequentCategories: frequentCategories, recentNotes: recentNotes, chartPoints: chartPoints
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;
