@@ -272,7 +272,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
         <button data-type="repayment" aria-pressed="false">还款</button>
       </div>
       <div class="form">
-        <label><span id="lblAmt">金额（RM）</span><input id="fAmt" type="number" step="0.01" inputmode="decimal" placeholder="0.00"></label>
+        <label><span id="lblAmt">金额（RM）</span><input id="fAmt" type="text" inputmode="decimal" placeholder="0.00，可输入 12+8.5" autocomplete="off"></label>
         <label>日期<input id="fDate" type="date"></label>
         <label id="rowCat">分类<select id="fCat"></select><div class="chips" id="catChips"></div></label>
         <label><span id="lblAcc">付款账户</span><select id="fAcc"></select></label>
@@ -339,6 +339,11 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     <div class="panel">
       <h2>账户进出（本月）</h2>
       <div id="rpAccounts"></div>
+    </div>
+    <div class="panel">
+      <h2>净资产（近 12 个月）</h2>
+      <p class="muted">已锁定月份用快照数值，其余按当时余额计算。</p>
+      <div id="rpNet"></div>
     </div>
     <div class="panel">
       <h2 id="rpYearTitle">年度收支</h2>
@@ -441,6 +446,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       <div class="form">
         <label>每月总预算（RM，0 = 用各分类预算之和）<input id="setBudget" type="number" step="1" inputmode="decimal"></label>
         <label>紧急备用金目标（月数）<input id="setEmerg" type="number" min="1" max="24" inputmode="numeric"></label>
+        <label>外观（仅这台设备）<select id="setTheme"><option value="">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
       </div>
       <div class="acts"><button class="btn primary" id="setSave">保存偏好</button></div>
     </div>
@@ -474,6 +480,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       <button class="btn primary" id="aSave">保存</button>
     </div>
     <div id="aLoanInfo" class="muted" hidden></div>
+    <div id="aSched" hidden><h3>未来 12 期还款计划（估算）</h3><div style="overflow-x:auto"><table class="tbl" id="aSchedTbl"></table></div></div>
     <h3>历史记录</h3>
     <ul class="hist" id="aHist"></ul>
     <h3>本月流水</h3>
@@ -536,7 +543,8 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       <label>类型<select id="cType"><option value="expense">支出</option><option value="income">收入</option></select></label>
       <label>月预算（RM，0 = 不设）<input id="cBudget" type="number" step="0.01" inputmode="decimal" value="0"></label>
     </div>
-    <div class="acts"><button class="btn primary" id="cSave">保存</button></div>
+    <div class="muted" id="cHint"></div>
+    <div class="acts"><button class="btn danger" id="cDel" hidden>删除</button><button class="btn primary" id="cSave">保存</button></div>
   </div>
 </div>
 
@@ -811,7 +819,8 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       })
       .map(function (r) {
         var key = r.id + '__' + m;
-        return { rec: r, key: key, done: !!done[key], date: dateInMonth(m, r.dayOfMonth) };
+        var skipped = (r.skipped || []).indexOf(m) >= 0;
+        return { rec: r, key: key, done: !!done[key] || skipped, skipped: skipped, date: dateInMonth(m, r.dayOfMonth) };
       })
       .sort(function (a, b) { return a.date.localeCompare(b.date); });
   }
@@ -1266,6 +1275,48 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     });
   }
 
+  // ---------- amount expressions, amortization ----------
+  // "12+8.5*2" -> 29 ; only digits . + - * / ( ) are accepted. Returns NaN for anything else.
+  function evalAmount(str) {
+    var src = String(str == null ? '' : str).replace(/,/g, '').replace(/\s+/g, '');
+    if (src === '' || !/^[\d.+\-*/()]+$/.test(src)) return NaN;
+    var i = 0;
+    function num() {
+      var m = src.slice(i).match(/^\d*\.?\d+/); if (!m) return NaN;
+      i += m[0].length; return parseFloat(m[0]);
+    }
+    function factor() {
+      if (src[i] === '(') { i++; var v = expr(); if (src[i] !== ')') return NaN; i++; return v; }
+      if (src[i] === '-') { i++; return -factor(); }
+      if (src[i] === '+') { i++; return factor(); }
+      return num();
+    }
+    function term() {
+      var v = factor();
+      while (src[i] === '*' || src[i] === '/') { var op = src[i++], r = factor(); v = op === '*' ? v * r : v / r; }
+      return v;
+    }
+    function expr() {
+      var v = term();
+      while (src[i] === '+' || src[i] === '-') { var op = src[i++], r = term(); v = op === '+' ? v + r : v - r; }
+      return v;
+    }
+    var out = expr();
+    return i === src.length && isFinite(out) ? round2(out) : NaN;
+  }
+  // Month-by-month schedule for a reducing-balance loan (first row = next payment). Stops at payoff or maxRows.
+  function amortization(balance, annualRatePct, payment, maxRows, startMonth) {
+    var rows = [], b = Number(balance), r = (Number(annualRatePct) || 0) / 100 / 12, p = Number(payment);
+    if (!(b > 0) || !(p > 0)) return rows;
+    for (var n = 1; n <= (maxRows || 12) && b > 0.005; n++) {
+      var it = round2(b * r), pr = Math.min(b, round2(p - it));
+      if (pr <= 0) break;
+      b = round2(b - pr);
+      rows.push({ n: n, month: startMonth ? addMonths(startMonth, n) : null, interest: it, principal: pr, payment: round2(it + pr), balance: b });
+    }
+    return rows;
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -1287,7 +1338,8 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     round2: round2, estimateInterest: estimateInterest, monthsToPayoff: monthsToPayoff, totalInterestToPayoff: totalInterestToPayoff,
     monthExpenseByCategory: monthExpenseByCategory, categoryReport: categoryReport, accountFlow: accountFlow, yearSummary: yearSummary,
     topExpenses: topExpenses, frequentCategories: frequentCategories, recentNotes: recentNotes, chartPoints: chartPoints,
-    cashEstimate: cashEstimate, budgetSummary: budgetSummary, goalProgress: goalProgress, insights: insights, findSimilar: findSimilar
+    cashEstimate: cashEstimate, budgetSummary: budgetSummary, goalProgress: goalProgress, insights: insights, findSimilar: findSimilar,
+    evalAmount: evalAmount, amortization: amortization
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;
@@ -1837,6 +1889,17 @@ function renderReport() {
     return '<div class="kpi"><span>' + esc(accName(k)) + ' <span class="muted">' + fl[k].n + ' 笔</span></span><b><span class="pos">+' + num(fl[k].in) + '</span> / <span class="neg">-' + num(fl[k].out) + '</span></b></div>';
   }).join('') : '<span class="muted">暂无</span>';
 
+  var months12 = L.monthRange(m, 12);
+  var nw = L.netWorthTrend(S.accounts, S.balances, S.rates, months12).map(function (x) {
+    var sn = S.snapshots[x.month];
+    return sn ? { month: x.month, net: sn.net, locked: true } : x;
+  });
+  $('rpNet').innerHTML = nw.length > 1 ? lineChart(nw.map(function (x) { return x.net; }), nw.map(function (x) { return x.month.slice(5); })) +
+    '<table class="tbl">' + nw.slice().reverse().map(function (x, i, all) {
+      var prev = all[i + 1];
+      var d = prev ? x.net - prev.net : null;
+      return '<tr><td>' + x.month + (x.locked ? ' <span class="tag">已锁定</span>' : '') + '</td><td>' + rm(x.net) + '</td><td class="' + (d > 0 ? 'pos' : d < 0 ? 'neg' : '') + '">' + (d == null ? '' : (d >= 0 ? '+' : '-') + num(Math.abs(d))) + '</td></tr>';
+    }).join('') + '</table>' : '<span class="muted">还没有足够的月份。每月更新余额或锁定快照后会出现趋势。</span>';
   var year = m.slice(0, 4), ys = L.yearSummary(txs, year);
   $('rpYearTitle').textContent = year + ' 年收支';
   $('rpYear').innerHTML = '<tr><th>月份</th><th>收入</th><th>支出</th><th>结余</th><th>储蓄率</th></tr>' + ys.rows.filter(function (r) { return r.income || r.expense; }).map(function (r) {
@@ -1986,7 +2049,8 @@ function resetEntry(keepEdit) {
   $('entryHint').textContent = '';
 }
 function entryFromForm() {
-  var t = S.entryType, amount = round2(Number($('fAmt').value));
+  var t = S.entryType, amount = L.evalAmount($('fAmt').value);
+  if (isFinite(amount)) $('fAmt').value = amount;
   var date = $('fDate').value;
   var tx = {
     date: date, month: (date || '').slice(0, 7), type: t, amount: amount,
@@ -2008,6 +2072,7 @@ function summaryOf(tx) {
   return TYPE_LABEL[tx.type] + ' ' + rm(tx.amount) + ' · ' + (tx.category || accName(tx.account)) + (tx.note ? ' · ' + tx.note : '');
 }
 async function saveEntry() {
+  if (isNaN(L.evalAmount($('fAmt').value))) return toast('金额格式不正确（可用 + - × ÷）');
   var tx = entryFromForm();
   if (!tx.account) return toast('请选择账户');
   if (tx.type === 'repayment' && tx.principal < 0) return toast('利息不能大于还款总额');
@@ -2219,7 +2284,7 @@ function renderPlan() {
   $('pendingRec').innerHTML = pend.filter(function (x) { return !x.done; }).map(function (x) {
     var r = x.rec;
     return '<li class="li"><span class="n"><b>' + esc(r.name) + '</b><small>' + esc(x.date) + ' · ' + esc(TYPE_LABEL[r.type]) + ' · ' + rm(r.amount) + '</small></span>' +
-      '<span class="acts"><button class="btn small primary" data-act="confirm-rec" data-id="' + esc(x.key) + '">确认记账</button></span></li>';
+      '<span class="acts"><button class="btn small" data-act="skip-rec" data-id="' + esc(x.key) + '">本月跳过</button><button class="btn small primary" data-act="confirm-rec" data-id="' + esc(x.key) + '">确认记账</button></span></li>';
   }).join('') || '<li class="empty">本月没有待确认项目</li>';
   if (pend.length && pend.every(function (x) { return x.done; })) $('pendingRec').innerHTML = '<li class="empty">本月定期项目已全部确认</li>';
   $('confirmAllBtn').hidden = pend.filter(function (x) { return !x.done; }).length < 2;
@@ -2300,6 +2365,9 @@ function openCat(id) {
   $('cName').value = c ? c.name : '';
   $('cType').value = c ? c.type : 'expense';
   $('cBudget').value = c ? (c.budget || 0) : 0;
+  var used = c ? txArr().filter(function (t) { return t.category === c.name; }).length : 0;
+  $('cHint').textContent = c ? (used ? '已有 ' + used + ' 笔流水用这个分类；改名会一并更新这些流水。' : '还没有流水使用这个分类，可以删除。') : '';
+  $('cDel').hidden = !c || used > 0; $('cDel').textContent = '删除';
   $('catSheet').hidden = false;
 }
 async function saveCat() {
@@ -2308,8 +2376,21 @@ async function saveCat() {
   var budget = round2(Number($('cBudget').value) || 0);
   if (budget < 0) return toast('预算不能为负数');
   var body = { name: name, type: $('cType').value, budget: budget, sort: S.editCatId ? (S.categories[S.editCatId].sort || 0) : Object.keys(S.categories).length + 1 };
+  var clash = catList().some(function (c) { return c.name === name && c.id !== S.editCatId; });
+  if (clash) return toast('已有同名分类');
   try {
-    if (S.editCatId) await S.db.collection('categories').doc(S.editCatId).set(body);
+    if (S.editCatId) {
+      var oldName = S.categories[S.editCatId].name;
+      await S.db.collection('categories').doc(S.editCatId).set(body);
+      if (oldName !== name) {
+        var affected = txArr().filter(function (t) { return t.category === oldName; });
+        for (var i = 0; i < affected.length; i += 8) {
+          await Promise.all(affected.slice(i, i + 8).map(function (t) { return S.db.collection('tx').doc(t.id).update({ category: name }); }));
+        }
+        recArr().filter(function (r) { return r.category === oldName; }).forEach(function (r) { S.db.collection('recurring').doc(r.id).update({ category: name }); });
+        if (affected.length) audit('分类改名', S.editCatId, oldName + ' → ' + name + '（' + affected.length + ' 笔）');
+      }
+    }
     else {
       var ref = await S.db.collection('categories').add(body);
       S.editCatId = ref.id;
@@ -2396,7 +2477,12 @@ function openAcc(id) {
       if (a.settlementQuote > 0) parts.push('银行结清报价 ' + rm(a.settlementQuote) + (ti != null ? '，比继续供省 ' + rm(Math.max(0, (lb.estimate != null ? lb.estimate : b.amount) + ti - a.settlementQuote)) : ''));
     }
     $('aLoanInfo').textContent = parts.join('。') + '。'; $('aLoanInfo').hidden = false;
-  } else $('aLoanInfo').hidden = true;
+    var sched = a.monthlyPayment > 0 ? L.amortization(lb.estimate != null ? lb.estimate : b.amount, a.rate || 0, a.monthlyPayment, 12, S.month) : [];
+    $('aSched').hidden = !sched.length;
+    $('aSchedTbl').innerHTML = '<tr><th>月份</th><th>利息</th><th>本金</th><th>余额</th></tr>' + sched.map(function (r) {
+      return '<tr><td>' + r.month + '</td><td>' + num(r.interest) + '</td><td>' + num(r.principal) + '</td><td>' + num(r.balance) + '</td></tr>';
+    }).join('');
+  } else { $('aLoanInfo').hidden = true; $('aSched').hidden = true; }
   var mine = txs.filter(function (t) { return t.month === S.month && (t.account === id || t.toAccount === id || t.loanId === id); })
     .sort(function (x, y) { return (y.date || '').localeCompare(x.date || ''); }).slice(0, 15);
   $('aTx').innerHTML = mine.map(function (t) {
@@ -2484,7 +2570,7 @@ function renderSettings() {
     return '<li class="li"><span class="n"><b>' + esc(s.id) + '</b><small>资产 ' + rm(s.assets) + ' · 负债 ' + rm(s.liabs) + '</small></span><span class="v"><b class="num">' + rm(s.net) + '</b></span></li>';
   }).join('') || '<li class="empty">还没有锁定的快照</li>';
   $('auditList').innerHTML = S.audit.map(function (a) {
-    var who = (S.names[a.byId] && S.names[a.byId].name) || '有人';
+    var who = a.byId === 'auto' ? '系统' : (S.names[a.byId] && S.names[a.byId].name) || '有人';
     return '<li class="li"><span class="n"><b>' + esc(a.summary || a.action) + '</b><small>' + esc((a.at || '').replace('T', ' ').slice(0, 16)) + ' · ' + esc(a.action) + ' · ' + esc(who) + '</small></span></li>';
   }).join('') || '<li class="empty">还没有修改记录</li>';
   $('memberList').innerHTML = arr(S.members).sort(function (a, b) { return (a.sort || 0) - (b.sort || 0); }).map(function (m) {
@@ -2697,7 +2783,7 @@ function showTab(name) {
   document.querySelectorAll('[data-tab]').forEach(function (b) { b.setAttribute('aria-selected', String(b.dataset.tab === name)); });
   var moreBtn = document.querySelector('#nav [data-more]'); if (moreBtn) moreBtn.setAttribute('aria-selected', String(['report', 'plan', 'settings'].indexOf(name) >= 0));
   document.querySelectorAll('.view').forEach(function (v) { v.hidden = v.id !== 'v-' + name; });
-  if (name === 'entry' && !S.editTxId) { fillAll(); setEntryType(S.entryType); if (!$('fDate').value) resetEntry(false); }
+  if (name === 'entry' && !S.editTxId) { fillAll(); setEntryType(S.entryType); if (!$('fDate').value) resetEntry(false); setTimeout(function () { if (!$('fAmt').value) $('fAmt').focus(); }, 60); }
   render();
   window.scrollTo(0, 0);
 }
@@ -2762,6 +2848,12 @@ document.addEventListener('click', function (e) {
     closeSheets(); toast('已删除');
   });
   if (a === 'confirm-rec') return confirmRec(id);
+  if (a === 'skip-rec') {
+    var rid = id.split('__')[0], rm0 = id.split('__')[1], rr = S.recurring[rid];
+    if (!rr) return;
+    var sk = (rr.skipped || []).concat([rm0]);
+    return S.db.collection('recurring').doc(rid).update({ skipped: sk }).then(function () { audit('跳过定期项目', rid, rr.name + ' ' + rm0); toast('本月已跳过'); }).catch(function (x) { toast(errText(x)); });
+  }
   if (a === 'new-cat') return openCat(null);
   if (a === 'open-cat') return openCat(id);
   if (a === 'new-rem') return openRem(null);
@@ -2789,13 +2881,14 @@ function armOrRun(key, fn) {
     return fn().catch(function (e) { toast(errText(e)); });
   }
   S.arm = key; S._armAt = Date.now();
-  setRecDelText(key.indexOf('del-rec') === 0 || key.indexOf('del-goal') === 0);
+  setRecDelText(key.indexOf('del-rec') === 0 || key.indexOf('del-goal') === 0 || key.indexOf('del-cat') === 0);
   render();
   setTimeout(function () { if (S.arm === key) { S.arm = null; setRecDelText(false); render(); } }, 4000);
 }
 function setRecDelText(armed) {
   $('rDel').textContent = armed ? '再点确认删除' : '删除';
   $('gDel').textContent = armed ? '再点确认删除' : '删除';
+  $('cDel').textContent = armed ? '再点确认删除' : '删除';
 }
 
 $('fSave').addEventListener('click', saveEntry);
@@ -2807,6 +2900,11 @@ $('rSave').addEventListener('click', saveRec);
 $('rType').addEventListener('change', syncRecForm);
 $('rDel').addEventListener('click', function () { if (S.editRecId) armOrRun('del-rec:' + S.editRecId, async function () { await S.db.collection('recurring').doc(S.editRecId).delete(); audit('删除定期项目', S.editRecId, ''); closeSheets(); toast('已删除'); }); });
 $('cSave').addEventListener('click', saveCat);
+$('cDel').addEventListener('click', function () {
+  if (!S.editCatId) return;
+  var id = S.editCatId;
+  armOrRun('del-cat:' + id, async function () { await S.db.collection('categories').doc(id).delete(); audit('删除分类', id, ''); closeSheets(); toast('已删除'); });
+});
 $('mSave').addEventListener('click', saveRem);
 ['lMonth', 'lMember', 'lType', 'lQ', 'lCat', 'lAcc'].forEach(function (id) {
   $(id).addEventListener('input', function () {
@@ -2826,6 +2924,13 @@ $('gSave').addEventListener('click', saveGoal);
 $('gDel').addEventListener('click', function () { if (S.editGoalId) armOrRun('del-goal:' + S.editGoalId, async function () { await S.db.collection('goals').doc(S.editGoalId).delete(); audit('删除目标', S.editGoalId, ''); closeSheets(); toast('已删除'); }); });
 $('memSave').addEventListener('click', saveMember);
 $('setSave').addEventListener('click', savePrefs);
+function applyTheme() {
+  var th = ''; try { th = localStorage.getItem('familyTheme') || ''; } catch (e) {}
+  if (th) document.documentElement.setAttribute('data-theme', th); else document.documentElement.removeAttribute('data-theme');
+  $('setTheme').value = th;
+}
+$('setTheme').addEventListener('change', function () { try { localStorage.setItem('familyTheme', $('setTheme').value); } catch (e) {} applyTheme(); });
+applyTheme();
 $('confirmAllBtn').addEventListener('click', function () { confirmAllRec().then(function () { toast('已全部记账'); }); });
 var deferredInstall = null;
 window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferredInstall = e; $('installBtn').hidden = false; });

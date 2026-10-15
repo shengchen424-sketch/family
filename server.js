@@ -72,14 +72,33 @@ function loadKeys() {
 }
 const KEYS = loadKeys();
 
+// Brute-force protection: after MAX_FAILS wrong keys from one address within WINDOW, that address waits BLOCK_MS.
+const MAX_FAILS = 8, WINDOW_MS = 10 * 60e3, BLOCK_MS = 15 * 60e3;
+const fails = new Map();
+function clientIp(req) { return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '?'; }
+function blocked(ip) {
+  const f = fails.get(ip);
+  return !!(f && f.until && f.until > Date.now());
+}
+function noteFail(ip) {
+  const now = Date.now();
+  let f = fails.get(ip);
+  if (!f || now - f.first > WINDOW_MS) f = { first: now, n: 0, until: 0 };
+  f.n++;
+  if (f.n >= MAX_FAILS) { f.until = now + BLOCK_MS; f.n = 0; f.first = now; console.log('密钥错误次数过多，暂时拒绝：' + ip); }
+  fails.set(ip, f);
+}
+function noteOk(ip) { fails.delete(ip); }
+setInterval(() => { const now = Date.now(); for (const [ip, f] of fails) if (now - f.first > WINDOW_MS && !(f.until > now)) fails.delete(ip); }, 60e3).unref();
+
 function keyFromRequest(req, url) {
   const q = url.searchParams.get('k');
   if (q && KEYS[q]) return q;
   const cookie = (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith('k='));
-  if (cookie) {
-    const v = decodeURIComponent(cookie.slice(2));
-    if (KEYS[v]) return v;
-  }
+  let v = null;
+  if (cookie) { try { v = decodeURIComponent(cookie.slice(2)); } catch (e) { v = null; } }
+  if (v && KEYS[v]) return v;
+  if (q || v) noteFail(clientIp(req));
   return null;
 }
 
@@ -202,7 +221,12 @@ const server = (process.env.TLS_CERT && process.env.TLS_KEY)
 
 async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
+  const ip = clientIp(req);
+  if (blocked(ip) && (url.pathname.startsWith('/api/') || url.searchParams.get('k'))) {
+    return send(res, 429, JSON.stringify({ ok: false, error: '密钥错误次数过多，请 15 分钟后再试', code: 'throttled' }), { 'Content-Type': 'application/json', 'Retry-After': '900' });
+  }
   const key = keyFromRequest(req, url);
+  if (key) noteOk(ip);
 
   if (req.method === 'GET' && url.pathname === '/') {
     // The page is an empty shell (no data inside), so it is served to everyone; every API call checks the key.
@@ -258,9 +282,35 @@ for (const fn of Object.keys(API)) {
   API[fn] = (ctx, ...args) => raw(...args);
 }
 
+// ---------- automatic month-end snapshot ----------
+// On the first run of a new month (checked every 6 h), lock last month's family totals if nobody did it by hand.
+const Logic = require('./src/logic.js');
+function withIds(m) { const o = {}; Object.keys(m).forEach(id => { o[id] = Object.assign({}, m[id], { id }); }); return o; }
+function autoSnapshot() {
+  try {
+    const prev = Logic.addMonths(Logic.nowMonth(), -1);
+    const snaps = load('snapshots');
+    if (snaps[prev]) return;
+    const balances = load('balances');
+    if (!Object.keys(balances).some(k => balances[k].month <= prev)) return;
+    const t = Logic.familyTotals(withIds(load('accounts')), balances, load('rates'), prev);
+    serial(() => {
+      const r2 = n => Math.round(n * 100) / 100;
+      snaps[prev] = { month: prev, assets: r2(t.assets), liabs: r2(t.liabs), net: r2(t.net), liquid: r2(t.liquid), missing: t.missing, lockedAt: new Date().toISOString(), byId: 'auto', auto: true };
+      save('snapshots');
+      const audit = load('audit');
+      audit['auto-' + prev] = { at: new Date().toISOString(), byId: 'auto', action: '自动月结', ref: prev, summary: prev + ' 净资产 RM ' + r2(t.net).toLocaleString('en-MY') };
+      save('audit');
+      console.log('已自动锁定 ' + prev + ' 快照');
+    });
+  } catch (e) { console.error('自动月结失败', e); }
+}
+setTimeout(autoSnapshot, 5000);
+setInterval(autoSnapshot, 6 * 3600e3).unref();
+
 server.listen(PORT, HOST, () => {
   const scheme = (process.env.TLS_CERT && process.env.TLS_KEY) ? 'https' : 'http';
   console.log('家庭资产服务已启动：' + scheme + '://' + HOST + ':' + PORT + '  数据目录：' + DATA_DIR);
 });
 
-module.exports = { API, KEYS, DATA_DIR };
+module.exports = { API, KEYS, DATA_DIR, autoSnapshot };

@@ -384,4 +384,31 @@ t('similar entries detected', () => {
   assert.strictEqual(L.findSimilar(txs, { type: 'expense', date: M + '-02', amount: 23.5, category: '饮食', account: 'pb-joint' }, 'a').length, 0);
 });
 
+// 12. Amount expressions, amortization, recurring skip
+t('amount expressions: arithmetic, parentheses, rejects junk', () => {
+  assert.strictEqual(L.evalAmount('12+8.5*2'), 29);
+  assert.strictEqual(L.evalAmount('(100-10)/3'), 30);
+  assert.strictEqual(L.evalAmount(' 1,250.50 '), 1250.5);
+  assert.strictEqual(L.evalAmount('-5+10'), 5);
+  assert.ok(isNaN(L.evalAmount('12+')));
+  assert.ok(isNaN(L.evalAmount('alert(1)')));
+  assert.ok(isNaN(L.evalAmount('')));
+});
+t('amortization schedule reduces the balance and stops at payoff', () => {
+  const rows = L.amortization(1000, 12, 300, 12, '2026-10');
+  assert.strictEqual(rows[0].interest, 10);
+  assert.strictEqual(rows[0].principal, 290);
+  assert.strictEqual(rows[0].month, '2026-11');
+  assert.strictEqual(rows[rows.length - 1].balance, 0);
+  assert.ok(rows.length === 4, 'rows ' + rows.length);
+  assert.strictEqual(L.amortization(1000, 24, 10).length, 0, 'payment below interest -> no schedule');
+});
+t('recurring: a skipped month counts as done', () => {
+  const rec = [{ id: 'r1', type: 'expense', amount: 1, dayOfMonth: 1, startMonth: '2026-01', active: true, skipped: ['2026-10'] }];
+  const it = L.recurringForMonth(rec, [], '2026-10')[0];
+  assert.strictEqual(it.done, true);
+  assert.strictEqual(it.skipped, true);
+  assert.strictEqual(L.recurringForMonth(rec, [], '2026-11')[0].done, false);
+});
+
 console.log('\n' + passed + ' tests passed');

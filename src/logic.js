@@ -195,7 +195,8 @@
       })
       .map(function (r) {
         var key = r.id + '__' + m;
-        return { rec: r, key: key, done: !!done[key], date: dateInMonth(m, r.dayOfMonth) };
+        var skipped = (r.skipped || []).indexOf(m) >= 0;
+        return { rec: r, key: key, done: !!done[key] || skipped, skipped: skipped, date: dateInMonth(m, r.dayOfMonth) };
       })
       .sort(function (a, b) { return a.date.localeCompare(b.date); });
   }
@@ -650,6 +651,48 @@
     });
   }
 
+  // ---------- amount expressions, amortization ----------
+  // "12+8.5*2" -> 29 ; only digits . + - * / ( ) are accepted. Returns NaN for anything else.
+  function evalAmount(str) {
+    var src = String(str == null ? '' : str).replace(/,/g, '').replace(/\s+/g, '');
+    if (src === '' || !/^[\d.+\-*/()]+$/.test(src)) return NaN;
+    var i = 0;
+    function num() {
+      var m = src.slice(i).match(/^\d*\.?\d+/); if (!m) return NaN;
+      i += m[0].length; return parseFloat(m[0]);
+    }
+    function factor() {
+      if (src[i] === '(') { i++; var v = expr(); if (src[i] !== ')') return NaN; i++; return v; }
+      if (src[i] === '-') { i++; return -factor(); }
+      if (src[i] === '+') { i++; return factor(); }
+      return num();
+    }
+    function term() {
+      var v = factor();
+      while (src[i] === '*' || src[i] === '/') { var op = src[i++], r = factor(); v = op === '*' ? v * r : v / r; }
+      return v;
+    }
+    function expr() {
+      var v = term();
+      while (src[i] === '+' || src[i] === '-') { var op = src[i++], r = term(); v = op === '+' ? v + r : v - r; }
+      return v;
+    }
+    var out = expr();
+    return i === src.length && isFinite(out) ? round2(out) : NaN;
+  }
+  // Month-by-month schedule for a reducing-balance loan (first row = next payment). Stops at payoff or maxRows.
+  function amortization(balance, annualRatePct, payment, maxRows, startMonth) {
+    var rows = [], b = Number(balance), r = (Number(annualRatePct) || 0) / 100 / 12, p = Number(payment);
+    if (!(b > 0) || !(p > 0)) return rows;
+    for (var n = 1; n <= (maxRows || 12) && b > 0.005; n++) {
+      var it = round2(b * r), pr = Math.min(b, round2(p - it));
+      if (pr <= 0) break;
+      b = round2(b - pr);
+      rows.push({ n: n, month: startMonth ? addMonths(startMonth, n) : null, interest: it, principal: pr, payment: round2(it + pr), balance: b });
+    }
+    return rows;
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -671,7 +714,8 @@
     round2: round2, estimateInterest: estimateInterest, monthsToPayoff: monthsToPayoff, totalInterestToPayoff: totalInterestToPayoff,
     monthExpenseByCategory: monthExpenseByCategory, categoryReport: categoryReport, accountFlow: accountFlow, yearSummary: yearSummary,
     topExpenses: topExpenses, frequentCategories: frequentCategories, recentNotes: recentNotes, chartPoints: chartPoints,
-    cashEstimate: cashEstimate, budgetSummary: budgetSummary, goalProgress: goalProgress, insights: insights, findSimilar: findSimilar
+    cashEstimate: cashEstimate, budgetSummary: budgetSummary, goalProgress: goalProgress, insights: insights, findSimilar: findSimilar,
+    evalAmount: evalAmount, amortization: amortization
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;
