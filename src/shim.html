@@ -1,0 +1,29 @@
+<script>
+/* Stands in for Apps Script's google.script.run on the VPS: same call shape, sent as POST /api/<function>. */
+(function () {
+  function runner() {
+    var ok = null, bad = null;
+    var r = {
+      withSuccessHandler: function (f) { ok = f; return r; },
+      withFailureHandler: function (f) { bad = f; return r; }
+    };
+    ['getMe', 'getSnapshot', 'setDoc', 'delDoc', 'uploadReceipt', 'getReceipt'].forEach(function (fn) {
+      r[fn] = function () {
+        var args = Array.prototype.slice.call(arguments);
+        var s = ok, b = bad;
+        fetch('/api/' + fn, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ args: args })
+        }).then(function (res) { return res.json(); }).then(function (j) {
+          if (j.ok) { if (s) s(j.result); }
+          else { if (b) b(new Error(j.error)); }
+        }).catch(function (e) { if (b) b(e); });
+        return r;
+      };
+    });
+    return r;
+  }
+  window.google = { script: { get run() { return runner(); } } };
+})();
+</script>

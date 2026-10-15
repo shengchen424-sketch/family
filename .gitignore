@@ -1,0 +1,6 @@
+data/
+*.pem
+*.key
+*.tmp
+node_modules/
+*.log

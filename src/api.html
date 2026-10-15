@@ -1,0 +1,147 @@
+<script>
+/* Data layer for the Apps Script build. Same shape as the document database the page was written against:
+ * collection(name).doc(id).set/update/delete, collection.add, collection.orderBy/limit/onSnapshot.
+ * Writes are applied locally at once, then sent to the server; the server copy is re-read every 15 s. */
+var Api = (function () {
+  var NAMES = ['accounts', 'balances', 'rates', 'tx', 'recurring', 'categories', 'members', 'reminders', 'snapshots', 'audit'];
+  var cache = {};
+  NAMES.forEach(function (n) { cache[n] = {}; });
+  var subs = {};
+  var inflight = 0;
+  var ready = false;
+  var readyCbs = [];
+  var clone = function (o) { return JSON.parse(JSON.stringify(o)); };
+  var gid = function () { return 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); };
+
+  function notify(name) { (subs[name] || []).forEach(function (s) { s.fire(); }); }
+  function notifyAll() { NAMES.forEach(notify); }
+
+  function snapOf(name, q) {
+    var o = cache[name] || {};
+    var docs = Object.keys(o).map(function (id) {
+      return { id: id, exists: true, data: function () { return clone(o[id]); } };
+    });
+    if (q.order) {
+      var f = q.order[0], dir = q.order[1] === 'desc' ? -1 : 1;
+      docs.sort(function (a, b) {
+        var x = a.data()[f], y = b.data()[f];
+        return (x > y ? 1 : x < y ? -1 : 0) * dir;
+      });
+    }
+    if (q.limit) docs = docs.slice(0, q.limit);
+    return { docs: docs, size: docs.length, empty: docs.length === 0 };
+  }
+
+  function refresh(done) {
+    if (inflight > 0) { if (done) done(); return; }
+    google.script.run
+      .withSuccessHandler(function (snap) {
+        NAMES.forEach(function (n) {
+          var m = {};
+          (snap[n] || []).forEach(function (r) { m[r.id] = r.data; });
+          cache[n] = m;
+        });
+        notifyAll();
+        if (!ready) { ready = true; readyCbs.splice(0).forEach(function (f) { f(); }); }
+        if (done) done();
+      })
+      .withFailureHandler(function (e) { if (done) done(e); })
+      .getSnapshot(NAMES);
+  }
+
+  function send(name, id, data, del) {
+    inflight++;
+    return new Promise(function (resolve, reject) {
+      var runner = google.script.run
+        .withSuccessHandler(function () { inflight--; resolve(); })
+        .withFailureHandler(function (e) { inflight--; reject({ code: 'unavailable', message: String(e && e.message || e) }); });
+      if (del) runner.delDoc(name, id); else runner.setDoc(name, id, data);
+    });
+  }
+
+  function write(name, id, data, merge) {
+    var exists = !!cache[name][id];
+    if (merge && !exists) return Promise.reject({ code: 'invalid_argument', message: '文档不存在' });
+    var prev = cache[name][id];
+    var next = merge ? Object.assign({}, prev, clone(data)) : clone(data);
+    cache[name][id] = next;
+    notify(name);
+    return send(name, id, next, false).catch(function (e) {
+      if (prev) cache[name][id] = prev; else delete cache[name][id];
+      notify(name);
+      throw e;
+    });
+  }
+
+  function remove(name, id) {
+    var prev = cache[name][id];
+    delete cache[name][id];
+    notify(name);
+    return send(name, id, null, true).catch(function (e) {
+      if (prev) cache[name][id] = prev;
+      notify(name);
+      throw e;
+    });
+  }
+
+  function Col(name, q) {
+    return {
+      orderBy: function (f, d) { return Col(name, Object.assign({}, q, { order: [f, d || 'asc'] })); },
+      limit: function (n) { return Col(name, Object.assign({}, q, { limit: n })); },
+      onSnapshot: function (next, err) {
+        var sub = { fire: function () { try { next(snapOf(name, q)); } catch (e) { console.error(e); } } };
+        (subs[name] = subs[name] || []).push(sub);
+        setTimeout(function () { if (ready) sub.fire(); else readyCbs.push(sub.fire); }, 0);
+        return function () { subs[name] = (subs[name] || []).filter(function (s) { return s !== sub; }); };
+      },
+      doc: function (id) {
+        return {
+          id: id,
+          set: function (d) { return write(name, id, d, false); },
+          update: function (d) { return write(name, id, d, true); },
+          delete: function () { return remove(name, id); }
+        };
+      },
+      add: function (d) {
+        var id = gid();
+        return write(name, id, d, false).then(function () { return { id: id }; });
+      }
+    };
+  }
+
+  var db = { collection: function (name) { return Col(name, {}); } };
+  var me = '';
+  var user = {
+    id: function () { return Promise.resolve(me || null); },
+    profiles: function (ids) {
+      var out = {};
+      (ids || []).forEach(function (id) {
+        out[id] = { id: id, name: id === me ? '我' : (String(id).split('@')[0] || ''), avatarUrl: '', color: '#666', guest: false, isMe: id === me, email: null };
+      });
+      return Promise.resolve(out);
+    }
+  };
+
+  function start(onReady) {
+    google.script.run.withSuccessHandler(function (email) { me = email || ''; }).getMe();
+    refresh();
+    setInterval(function () { refresh(); }, 15000);
+    if (onReady) { if (ready) onReady(); else readyCbs.push(onReady); }
+  }
+
+  return {
+    db: db, user: user, start: start, refresh: refresh,
+    pending: function () { return inflight; },
+    receiptUpload: function (dataUrl, name) {
+      return new Promise(function (resolve, reject) {
+        google.script.run.withSuccessHandler(resolve).withFailureHandler(function (e) { reject(e); }).uploadReceipt(dataUrl, name);
+      });
+    },
+    receiptGet: function (fileId) {
+      return new Promise(function (resolve, reject) {
+        google.script.run.withSuccessHandler(resolve).withFailureHandler(function (e) { reject(e); }).getReceipt(fileId);
+      });
+    }
+  };
+})();
+</script>
