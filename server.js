@@ -249,7 +249,10 @@ const API = {
 
 // ---------- HTTP ----------
 function send(res, code, body, headers) {
-  res.writeHead(code, Object.assign({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' }, headers || {}));
+  res.writeHead(code, Object.assign({
+    'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'self'"
+  }, headers || {}));
   res.end(body);
 }
 function readBody(req) {
@@ -282,7 +285,7 @@ async function handle(req, res) {
     if (key && url.searchParams.get('k')) {
       headers['Set-Cookie'] = 'k=' + encodeURIComponent(key) + '; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=31536000';
     }
-    return send(res, 200, fs.readFileSync(PAGE, 'utf8'), headers);
+    return send(res, 200, fs.readFileSync(PAGE, 'utf8').replace('__BUILD__', buildId()), headers);
   }
   if (req.method === 'GET' && (url.pathname === '/sw.js' || url.pathname === '/manifest.webmanifest' || url.pathname.startsWith('/icons/'))) {
     const rel = url.pathname.slice(1);
@@ -303,6 +306,13 @@ async function handle(req, res) {
     return send(res, 200, fs.readFileSync(file), { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=604800' });
   }
   if (req.method === 'GET' && url.pathname === '/favicon.ico') return send(res, 204, '');
+  // Play Store (TWA) verification file and the privacy policy page, both public
+  if (req.method === 'GET' && (url.pathname === '/.well-known/assetlinks.json' || url.pathname === '/privacy.html')) {
+    const file = path.join(PUBLIC_DIR, url.pathname.slice(1));
+    if (!fs.existsSync(file)) return send(res, 404, 'Not found', { 'Content-Type': 'text/plain; charset=utf-8' });
+    const type = url.pathname.endsWith('.json') ? 'application/json' : 'text/html; charset=utf-8';
+    return send(res, 200, fs.readFileSync(file), { 'Content-Type': type, 'Cache-Control': 'public, max-age=3600' });
+  }
 
   if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
     if (!key) return send(res, 403, JSON.stringify({ ok: false, error: '未授权', code: 'unauthorized' }), { 'Content-Type': 'application/json' });

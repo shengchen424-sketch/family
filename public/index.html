@@ -201,6 +201,9 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .sync{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin:-6px 0 10px}
 .sync button{background:none;border:0;color:var(--accent);font:inherit;font-size:12px;cursor:pointer;padding:0}
 .sync.off{color:var(--neg)}
+.sync[hidden]{display:none}
+.help h3{margin-top:14px}
+.help p{margin:4px 0;font-size:13px}
 .welcome{background:var(--surface);border:1px solid var(--accent);border-radius:12px;padding:16px;margin-bottom:12px}
 .welcome ol{margin:8px 0 0;padding-left:20px}
 .welcome li{margin:4px 0}
@@ -460,6 +463,12 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     </div>
 
     <div class="panel">
+      <h2>使用说明</h2>
+      <div class="acts" style="justify-content:flex-start"><button class="btn" id="helpBtn">打开使用说明</button></div>
+      <p class="muted" style="margin-top:8px">版本 <span id="buildId">__BUILD__</span></p>
+    </div>
+
+    <div class="panel">
       <h2>安装到手机</h2>
       <p class="muted" id="installHint">Android Chrome：菜单 → “添加到主屏幕”或“安装应用”。iPhone Safari：分享 → “添加到主屏幕”。安装后像普通 App 一样打开，离线也能打开页面。</p>
       <div class="acts" style="justify-content:flex-start"><button class="btn" id="installBtn" hidden>安装应用</button><button class="btn" id="logoutBtn">退出（清除这台手机上的密钥）</button></div>
@@ -614,6 +623,27 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       <button class="btn" data-tab="plan"><span>预算、定期项目、目标、提醒</span><span>›</span></button>
       <button class="btn" data-tab="settings"><span>导入账单、备份、成员、设置</span><span>›</span></button>
     </div>
+  </div>
+</div>
+
+<!-- Help -->
+<div class="sheet" id="helpSheet" hidden>
+  <div class="panelbox help" role="dialog" aria-modal="true">
+    <div class="ph"><h2>使用说明</h2><button class="btn small" data-close>关闭</button></div>
+    <h3>每月例行（10 分钟）</h3>
+    <p>1. 「余额」→「本月批量更新」，把各银行、投资、贷款的最新余额填进去（负债填正数）。</p>
+    <p>2. 「更多 → 预算与定期」确认本月的月供、保费等定期项目；勾了“自动入账”的会自动记。</p>
+    <p>3. 「更多 → 报表」看分类支出、环比和年度表；总览可以“分享本月小结”给家人。</p>
+    <p>4. 月底锁定快照（设置里），或等系统在下个月自动锁定。</p>
+    <h3>记账</h3>
+    <p>底部 ＋ 进入记账。金额可以直接输 12+8.5；分类下方的胶囊是最常用分类；备注会自动联想。拍照可附收据，流水里点“收据”查看。</p>
+    <p>转账用于账户之间搬钱，不算收支；还款会自动按贷款利率估算利息，本金不算支出，利息算支出。</p>
+    <h3>银行账单导入</h3>
+    <p>「设置」选择 CSV 或 PDF 对账单，预览后导入。PDF 会用余额变动判断收支方向，判断不了的标“待确认”，点一下切换。重复导入会自动跳过。</p>
+    <h3>数据与安全</h3>
+    <p>数据存在自己的服务器，每天自动备份，设置里可随时导出 JSON。每位家庭成员有自己的密钥，修改记录会显示是谁改的。密钥输错多次会被暂时拒绝。</p>
+    <h3>总览里的指标</h3>
+    <p>家庭净资产 = 家庭资产 − 家庭负债（企业账户单独算）。紧急备用金 = 可动用现金与定存 ÷ 近 3 个月平均支出。储蓄率 = 结余 ÷ 收入。</p>
   </div>
 </div>
 
@@ -2994,6 +3024,7 @@ function showTab(name) {
   document.querySelectorAll('[data-tab]').forEach(function (b) { b.setAttribute('aria-selected', String(b.dataset.tab === name)); });
   var moreBtn = document.querySelector('#nav [data-more]'); if (moreBtn) moreBtn.setAttribute('aria-selected', String(['report', 'plan', 'settings'].indexOf(name) >= 0));
   document.querySelectorAll('.view').forEach(function (v) { v.hidden = v.id !== 'v-' + name; });
+  if (name === 'ledger' && !S._ledgerOpened) { S._ledgerOpened = true; if (!$('lMonth').value) { $('lMonth').value = S.month; S.ledger.month = S.month; } }
   if (name === 'entry' && !S.editTxId) { fillAll(); setEntryType(S.entryType); if (!$('fDate').value) resetEntry(false); setTimeout(function () { if (!$('fAmt').value) $('fAmt').focus(); }, 60); }
   render();
   window.scrollTo(0, 0);
@@ -3164,6 +3195,7 @@ $('month').addEventListener('change', function (e) { if (e.target.value) { S.mon
 $('mPrev').addEventListener('click', function () { S.month = L.addMonths(S.month, -1); render(); });
 $('mNext').addEventListener('click', function () { S.month = L.addMonths(S.month, 1); render(); });
 $('shareBtn').addEventListener('click', shareSummary);
+$('helpBtn').addEventListener('click', function () { $('helpSheet').hidden = false; });
 $('syncBtn').addEventListener('click', function () { $('syncText').textContent = '正在刷新…'; window.Api.refresh(function (e) { setSync(e ? '无法连接服务器，显示的是上次数据' : '', !!e); }); });
 function setSync(msg, off) {
   var el = $('sync');
