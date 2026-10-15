@@ -374,7 +374,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     <div class="panel">
       <h2 id="rpYearTitle">年度收支</h2>
       <div style="overflow-x:auto"><table class="tbl" id="rpYear"></table></div>
-      <div class="acts" style="margin-top:8px"><button class="btn small" id="rpExport">导出本月分类报表 CSV</button></div>
+      <div class="acts" style="margin-top:8px"><button class="btn small" id="rpExportYear">导出年度表 CSV</button><button class="btn small" id="rpExport">导出本月分类报表 CSV</button></div>
     </div>
   </section>
 
@@ -448,6 +448,23 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
         <label class="btn" id="restoreLbl">从备份恢复<input id="restoreFile" type="file" accept=".json,application/json" hidden></label>
       </div>
       <div class="muted" id="backupSum" style="margin-top:8px"></div>
+    </div>
+
+    <div class="panel">
+      <h2>数据体检</h2>
+      <div class="ins" id="healthList"></div>
+    </div>
+
+    <div class="panel" id="srvBackupPanel" hidden>
+      <h2>服务器每日备份</h2>
+      <p class="muted">服务器每天自动留一份，保留 30 天。恢复是按编号合并：备份里有的记录会覆盖现在的，之后新增的记录保留。</p>
+      <div class="form"><label>选择日期<select id="srvBackupDay"></select></label></div>
+      <div class="acts"><button class="btn" id="srvRestoreBtn">恢复到这一天</button></div>
+    </div>
+
+    <div class="panel" id="inactivePanel" hidden>
+      <h2>已停用账户</h2>
+      <ul class="list" id="inactiveList"></ul>
     </div>
 
     <div class="panel">
@@ -1788,11 +1805,25 @@ async function lockSnapshot(btn) {
 function renderSettings() {
   $('seedPanel').hidden = Object.keys(S.accounts).length > 0;
   $('restoreLbl').hidden = !(window.Api && window.Api.isOwner());
+  $('healthList').innerHTML = L.healthCheck({ accounts: S.accounts, balances: S.balances, tx: txArr(), recurring: recArr(), goals: arr(S.goals), categories: catList(), month: S.month })
+    .map(function (x) { return '<div><i class="' + (x.level === 'ok' ? 'ok' : x.level === 'warn' ? 'warn' : '') + '"></i><span>' + esc(x.text) + '</span></div>'; }).join('');
+  var inactive = arr(S.accounts).filter(function (a) { return a.active === false; });
+  $('inactivePanel').hidden = !inactive.length;
+  $('inactiveList').innerHTML = inactive.map(function (a) {
+    return '<li class="li"><span class="n"><b>' + esc(a.name) + '</b><small>' + esc((a.category || '') + ' · ' + a.currency) + '</small></span><span class="acts"><button class="btn small" data-act="reactivate" data-id="' + esc(a.id) + '">恢复</button></span></li>';
+  }).join('');
+  if (window.Api && window.Api.isOwner() && !S._backupsLoaded) {
+    S._backupsLoaded = true;
+    window.Api.call('listBackups').then(function (days) {
+      $('srvBackupPanel').hidden = !days.length;
+      $('srvBackupDay').innerHTML = days.map(function (d) { return '<option value="' + esc(d) + '">' + esc(d) + '</option>'; }).join('');
+    }).catch(function () {});
+  }
   $('lockBtn').textContent = '锁定 ' + S.month + ' 快照';
   $('lockBtn').classList.toggle('armed', S.arm === 'lock');
   var snaps = arr(S.snapshots).sort(function (a, b) { return b.id.localeCompare(a.id); });
   $('snapList').innerHTML = snaps.map(function (s) {
-    return '<li class="li"><span class="n"><b>' + esc(s.id) + '</b><small>资产 ' + rm(s.assets) + ' · 负债 ' + rm(s.liabs) + '</small></span><span class="v"><b class="num">' + rm(s.net) + '</b></span></li>';
+    return '<li class="li"><span class="n"><b>' + esc(s.id) + (s.auto ? ' <span class="tag">自动</span>' : '') + '</b><small>资产 ' + rm(s.assets) + ' · 负债 ' + rm(s.liabs) + (s.bizNet != null ? ' · 企业 ' + rm(s.bizNet) : '') + '</small></span><span class="v"><b class="num">' + rm(s.net) + '</b></span></li>';
   }).join('') || '<li class="empty">还没有锁定的快照</li>';
   $('auditList').innerHTML = S.audit.map(function (a) {
     var who = a.byId === 'auto' ? '系统' : (S.names[a.byId] && S.names[a.byId].name) || '有人';
@@ -1832,6 +1863,9 @@ async function seedData(btn) {
     jobs.push(S.db.collection('rates').doc(m).set({ sgdMyr: seed.rate || L.DEFAULT_RATE, updatedAt: now }));
     [['Chen', 1], ['Liza', 2], ['Uning', 3]].forEach(function (x) { jobs.push(S.db.collection('members').doc(x[0]).set({ name: x[0], sort: x[1] })); });
     SEED_CATEGORIES.forEach(function (c, i) { jobs.push(S.db.collection('categories').doc('c-' + (i + 1)).set({ name: c[0], type: c[1], budget: 0, sort: i + 1 })); });
+    [['补上 Uning 保险的现金价值', '账户「Uning保险（未提供）」还没有余额'], ['核对 Hilux 估值', '工作簿按 95,000 估，查一下二手行情'], ['核对 Chen 另一份保单名称', '账户「Chen另一保单（待核名）」']].forEach(function (x, i) {
+      jobs.push(S.db.collection('reminders').doc('seed-' + (i + 1)).set({ title: x[0], date: L.addMonths(m, 0) + '-31', note: x[1], done: false }));
+    });
     for (var i = 0; i < jobs.length; i += 8) await Promise.all(jobs.slice(i, i + 8));
     audit('导入期初数据', m, seed.accounts.length + ' 个账户');
     toast('期初数据已导入');
@@ -2089,6 +2123,7 @@ document.addEventListener('click', function (e) {
   if (a === 'lock-snap') return lockSnapshot(act);
   if (a === 'seed') return seedData(act);
   if (a === 'batch-bal') return openBatch();
+  if (a === 'reactivate') return S.db.collection('accounts').doc(id).update({ active: true }).then(function () { audit('恢复账户', id, accName(id)); toast('已恢复'); }).catch(function (x) { toast(errText(x)); });
   if (a === 'new-goal') return openGoal(null);
   if (a === 'open-goal') return openGoal(id);
   if (a === 'new-member') return openMember(null);
@@ -2157,6 +2192,16 @@ $('logoutBtn').addEventListener('click', function () { if (window.FamilyKey) win
 $('backupBtn').addEventListener('click', backupAll);
 $('restoreFile').addEventListener('change', restoreBackup);
 $('rpExport').addEventListener('click', exportReport);
+$('rpExportYear').addEventListener('click', function () {
+  var ys = L.yearSummary(txArr(), S.month.slice(0, 4));
+  var csv = L.toCSV(ys.rows.concat([Object.assign({ month: '全年' }, ys.total)]), [
+    { label: '月份', get: function (r) { return r.month; } }, { label: '收入', get: function (r) { return r.income.toFixed(2); } },
+    { label: '支出', get: function (r) { return r.expense.toFixed(2); } }, { label: '结余', get: function (r) { return r.net.toFixed(2); } },
+    { label: '储蓄率%', get: function (r) { return r.savingsRate == null ? '' : (r.savingsRate * 100).toFixed(1); } }
+  ]);
+  if (!S.downloads) return toast('当前视图不支持导出');
+  S.downloads.save({ filename: 'year-' + S.month.slice(0, 4) + '.csv', data: csv }).catch(function () { toast('导出已取消'); });
+});
 $('gSave').addEventListener('click', saveGoal);
 $('bSave').addEventListener('click', saveBatch);
 $('gDel').addEventListener('click', function () { if (S.editGoalId) armOrRun('del-goal:' + S.editGoalId, async function () { await S.db.collection('goals').doc(S.editGoalId).delete(); audit('删除目标', S.editGoalId, ''); closeSheets(); toast('已删除'); }); });
@@ -2180,6 +2225,15 @@ $('mPrev').addEventListener('click', function () { S.month = L.addMonths(S.month
 $('mNext').addEventListener('click', function () { S.month = L.addMonths(S.month, 1); render(); });
 $('shareBtn').addEventListener('click', shareSummary);
 $('helpBtn').addEventListener('click', function () { $('helpSheet').hidden = false; });
+$('srvRestoreBtn').addEventListener('click', function () {
+  var day = $('srvBackupDay').value; if (!day) return;
+  armOrRun('restore:' + day, async function () {
+    var r = await window.Api.call('restoreBackup', day);
+    audit('恢复服务器备份', day, r.imported + ' 条');
+    window.Api.refresh(); toast('已从 ' + day + ' 恢复 ' + r.imported + ' 条');
+  });
+  if (S.arm === 'restore:' + day) $('srvRestoreBtn').textContent = '再点确认恢复 ' + day; else $('srvRestoreBtn').textContent = '恢复到这一天';
+});
 $('syncBtn').addEventListener('click', function () { $('syncText').textContent = '正在刷新…'; window.Api.refresh(function (e) { setSync(e ? '无法连接服务器，显示的是上次数据' : '', !!e); }); });
 function setSync(msg, off) {
   var el = $('sync');

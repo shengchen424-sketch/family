@@ -444,4 +444,29 @@ t('auto-post picks due, unposted, autoPost items only', () => {
   assert.strictEqual(L.dueAutoPost(rec, posted, '2026-10-15').length, 0);
 });
 
+// 14. Health check
+t('health check flags dangling references, stale balances and duplicates', () => {
+  const h = L.healthCheck({
+    accounts: accounts, balances: { 'x': { month: '2026-05', accountId: 'luno', amount: 1, currency: 'MYR' } }, month: M,
+    categories: [{ name: '饮食', type: 'expense' }],
+    tx: [
+      { type: 'expense', month: M, date: M + '-01', amount: 1, category: '饮食', account: 'ghost', member: 'Chen' },
+      { type: 'expense', month: M, date: M + '-01', amount: 1, category: '旧分类', account: 'pb-joint' },
+      { type: 'expense', month: M, date: M + '-01', amount: 1, category: '饮食', account: 'pb-joint', importKey: 'k1', member: 'Chen' },
+      { type: 'expense', month: M, date: M + '-01', amount: 1, category: '饮食', account: 'pb-joint', importKey: 'k1', member: 'Chen' }
+    ],
+    recurring: [{ name: 'R', type: 'repayment', active: true, loanId: 'none' }],
+    goals: [{ name: 'G', accountId: 'none' }]
+  });
+  const texts = h.map(x => x.text).join('|');
+  assert.ok(/1 笔流水指向不存在的账户/.test(texts));
+  assert.ok(/1 笔流水的分类已不存在/.test(texts));
+  assert.ok(/没有归属成员/.test(texts));
+  assert.ok(/定期项目「R」没有有效的贷款/.test(texts));
+  assert.ok(/目标「G」/.test(texts));
+  assert.ok(/1 笔导入的流水疑似重复/.test(texts));
+  assert.ok(/超过 3 个月没更新/.test(texts));
+  assert.deepStrictEqual(L.healthCheck({ accounts: {}, tx: [] }).map(x => x.level), ['ok']);
+});
+
 console.log('\n' + passed + ' tests passed');

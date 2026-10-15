@@ -733,6 +733,51 @@
       .filter(function (it) { return !it.done && it.date <= today; });
   }
 
+  // ---------- data health check ----------
+  // Problems a family book accumulates over time: references to missing accounts/categories, stale balances, etc.
+  function healthCheck(d) {
+    var out = [], accounts = d.accounts || {}, cats = {}, m = d.month || nowMonth();
+    (d.categories || []).forEach(function (c) { cats[c.name] = c; });
+    var txs = d.tx || [], badAcc = 0, badCat = 0, badLoan = 0, noMember = 0;
+    txs.forEach(function (t) {
+      if (t.account && !accounts[t.account]) badAcc++;
+      if (t.toAccount && !accounts[t.toAccount]) badAcc++;
+      if ((t.type === 'income' || t.type === 'expense') && t.category && !cats[t.category]) badCat++;
+      if (t.type === 'repayment' && t.loanId && !accounts[t.loanId]) badLoan++;
+      if (!t.member) noMember++;
+    });
+    if (badAcc) out.push({ level: 'warn', text: badAcc + ' 笔流水指向不存在的账户' });
+    if (badCat) out.push({ level: 'warn', text: badCat + ' 笔流水的分类已不存在（在分类里重新建同名分类即可恢复统计）' });
+    if (badLoan) out.push({ level: 'warn', text: badLoan + ' 笔还款指向不存在的贷款' });
+    if (noMember) out.push({ level: 'info', text: noMember + ' 笔流水没有归属成员' });
+    (d.recurring || []).forEach(function (r) {
+      if (r.active === false) return;
+      if (r.account && !accounts[r.account]) out.push({ level: 'warn', text: '定期项目「' + r.name + '」的账户不存在' });
+      if (r.type === 'repayment' && (!r.loanId || !accounts[r.loanId])) out.push({ level: 'warn', text: '定期项目「' + r.name + '」没有有效的贷款' });
+      if (r.type !== 'repayment' && r.category && !cats[r.category]) out.push({ level: 'warn', text: '定期项目「' + r.name + '」的分类不存在' });
+    });
+    (d.goals || []).forEach(function (g) { if (g.accountId && !accounts[g.accountId]) out.push({ level: 'warn', text: '目标「' + g.name + '」关联的账户不存在' }); });
+    var stale = 0, inactiveWithBal = 0;
+    activeAccounts(accounts).forEach(function (a) {
+      var v = valueAt(d.balances || {}, a.id, m);
+      if (v.status === 'carried' && addMonths(v.b.month, 3) <= m) stale++;
+    });
+    if (stale) out.push({ level: 'info', text: stale + ' 个账户的余额已超过 3 个月没更新' });
+    Object.keys(accounts).forEach(function (id) {
+      var a = accounts[id];
+      if (a.active === false && a.kind === 'liability') {
+        var lb = latestBalance(d.balances || {}, id, m);
+        if (lb && lb.amount > 0) inactiveWithBal++;
+      }
+    });
+    if (inactiveWithBal) out.push({ level: 'info', text: inactiveWithBal + ' 个已停用的负债账户仍有余额记录（停用的账户不计入总额）' });
+    var dupKeys = {}, dups = 0;
+    txs.forEach(function (t) { if (t.importKey) { if (dupKeys[t.importKey]) dups++; dupKeys[t.importKey] = true; } });
+    if (dups) out.push({ level: 'warn', text: dups + ' 笔导入的流水疑似重复（相同日期、金额、描述）' });
+    if (!out.length) out.push({ level: 'ok', text: '没有发现问题' });
+    return out;
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -756,7 +801,8 @@
     topExpenses: topExpenses, frequentCategories: frequentCategories, recentNotes: recentNotes, chartPoints: chartPoints,
     cashEstimate: cashEstimate, budgetSummary: budgetSummary, goalProgress: goalProgress, insights: insights, findSimilar: findSimilar,
     evalAmount: evalAmount, amortization: amortization,
-    dayTotals: dayTotals, calendarGrid: calendarGrid, weekSummary: weekSummary, dueAutoPost: dueAutoPost
+    dayTotals: dayTotals, calendarGrid: calendarGrid, weekSummary: weekSummary, dueAutoPost: dueAutoPost,
+    healthCheck: healthCheck
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;

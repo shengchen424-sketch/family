@@ -21,6 +21,7 @@ const PORT = Number(process.env.PORT || 8443);
 const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
 const RECEIPT_DIR = path.join(DATA_DIR, 'receipts');
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const COLLECTIONS = ['accounts', 'balances', 'rates', 'tx', 'recurring', 'categories', 'members', 'reminders', 'snapshots', 'audit', 'goals', 'settings'];
 const MAX_BODY = 12 * 1024 * 1024;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -239,6 +240,24 @@ const API = {
     });
   },
 
+  listBackups() {
+    try { return fs.readdirSync(BACKUP_DIR).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse(); } catch (e) { return []; }
+  },
+  restoreBackup(ctx, day) {
+    if (ctx.me !== OWNER) throw new Error('只有 ' + OWNER + ' 可以恢复备份');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ''))) throw new Error('日期不正确');
+    const dir = path.join(BACKUP_DIR, day);
+    if (!fs.existsSync(dir)) throw new Error('没有这一天的备份');
+    const data = {};
+    COLLECTIONS.forEach(n => {
+      const f = path.join(dir, n + '.json');
+      if (!fs.existsSync(f)) return;
+      const m = JSON.parse(fs.readFileSync(f, 'utf8'));
+      data[n] = Object.keys(m).map(id => ({ id, data: m[id] }));
+    });
+    return API.importAll(ctx, data);
+  },
+
   getReceipt(fileId) {
     if (!/^[a-f0-9]{24}$/.test(String(fileId || ''))) throw new Error('编号不正确');
     const bin = path.join(RECEIPT_DIR, fileId + '.bin');
@@ -333,7 +352,7 @@ async function handle(req, res) {
 
 // Functions that need the caller as first argument are wrapped above; the rest take their arguments directly.
 for (const fn of Object.keys(API)) {
-  if (fn === 'getMe' || fn === 'importAll') continue;
+  if (fn === 'getMe' || fn === 'importAll' || fn === 'restoreBackup') continue;
   const raw = API[fn];
   API[fn] = (ctx, ...args) => raw(...args);
 }
@@ -392,7 +411,6 @@ setTimeout(autoPostRecurring, 8000);
 setInterval(autoPostRecurring, 3600e3).unref();
 
 // ---------- daily on-disk backup of the JSON collections (last 30 days kept) ----------
-const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 function dailyBackup() {
   try {
     const day = Logic.todayKuching();
