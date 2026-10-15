@@ -110,7 +110,7 @@ var Api = (function () {
   }
 
   var db = { collection: function (name) { return Col(name, {}); } };
-  var me = '', mePromise = null;
+  var me = '', mePromise = null, isOwner = false;
   var user = {
     id: function () { return (mePromise || Promise.resolve()).then(function () { return me || null; }); },
     profiles: function (ids) {
@@ -124,7 +124,10 @@ var Api = (function () {
 
   function start(onReady, onError) {
     mePromise = new Promise(function (resolve) {
-      google.script.run.withSuccessHandler(function (email) { me = email || ''; resolve(); }).withFailureHandler(function () { resolve(); }).getMe();
+      google.script.run.withSuccessHandler(function (who) {
+        if (who && typeof who === 'object') { me = who.name || ''; isOwner = !!who.owner; } else { me = who || ''; isOwner = true; }
+        resolve();
+      }).withFailureHandler(function () { resolve(); }).getMe();
     });
     refresh(function (e) { if (e && !ready && onError) onError(e); });
     setInterval(function () { refresh(); }, 15000);
@@ -132,7 +135,7 @@ var Api = (function () {
   }
 
   return {
-    db: db, user: user, start: start, refresh: refresh,
+    db: db, user: user, start: start, refresh: refresh, isOwner: function () { return isOwner; },
     pending: function () { return inflight; },
     receiptUpload: function (dataUrl, name) {
       return new Promise(function (resolve, reject) {

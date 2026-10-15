@@ -71,6 +71,9 @@ function loadKeys() {
   return map;
 }
 const KEYS = loadKeys();
+// The owner (first key's name, or FAMILY_OWNER) may restore backups and manage members; everyone may record.
+const OWNER = process.env.FAMILY_OWNER || KEYS[Object.keys(KEYS)[0]];
+const Logic = require('./src/logic.js');
 
 // Brute-force protection: after MAX_FAILS wrong keys from one address within WINDOW, that address waits BLOCK_MS.
 const MAX_FAILS = 8, WINDOW_MS = 10 * 60e3, BLOCK_MS = 15 * 60e3;
@@ -129,9 +132,46 @@ function serial(fn) {
 function assertName(name) {
   if (!COLLECTIONS.includes(name)) throw new Error('未知的集合：' + name);
 }
+// Server-side sanity checks so a buggy client (or a hand-written request) cannot corrupt the books.
+function validateDoc(name, d) {
+  const num = v => v == null || v === '' || (typeof v === 'number' && isFinite(v));
+  if (name === 'tx') {
+    const err = Logic.validateTx(d);
+    if (err) throw new Error(err);
+    if (!(d.month === String(d.date).slice(0, 7))) throw new Error('月份与日期不一致');
+    if (d.note != null && String(d.note).length > 200) throw new Error('备注太长');
+  }
+  if (name === 'balances') {
+    if (!/^\d{4}-\d{2}$/.test(d.month || '') || !d.accountId) throw new Error('余额记录缺少月份或账户');
+    if (!(typeof d.amount === 'number' && isFinite(d.amount) && d.amount >= 0)) throw new Error('余额必须是不小于 0 的数字');
+    if (d.asOf && !Logic.isDate(d.asOf)) throw new Error('截至日期不正确');
+  }
+  if (name === 'accounts') {
+    if (!d.name || String(d.name).length > 80) throw new Error('账户名称不正确');
+    if (!['asset', 'liability'].includes(d.kind)) throw new Error('账户类别不正确');
+    if (!['MYR', 'SGD'].includes(d.currency)) throw new Error('币种不支持');
+    ['rate', 'monthlyPayment', 'settlementQuote', 'sort'].forEach(k => { if (!num(d[k])) throw new Error('数值字段不正确：' + k); });
+  }
+  if (name === 'rates' && !(d.sgdMyr > 0)) throw new Error('汇率必须大于 0');
+  if (name === 'categories' && (!d.name || !['expense', 'income'].includes(d.type) || !num(d.budget))) throw new Error('分类数据不正确');
+  if (name === 'recurring' && (!d.name || !(d.amount > 0) || !Logic.TX_TYPES.includes(d.type))) throw new Error('定期项目数据不正确');
+  if (name === 'goals' && (!d.name || !(d.target > 0))) throw new Error('目标数据不正确');
+  if (JSON.stringify(d).length > 20000) throw new Error('记录太大');
+}
+const AUDIT_MAX = 2000;
+function pruneAudit(m) {
+  const ids = Object.keys(m);
+  if (ids.length <= AUDIT_MAX) return;
+  ids.sort((a, b) => String(m[a].at || '').localeCompare(String(m[b].at || '')));
+  ids.slice(0, ids.length - AUDIT_MAX).forEach(id => { delete m[id]; });
+}
+function removeReceipt(fileId) {
+  if (!/^[a-f0-9]{24}$/.test(String(fileId || ''))) return;
+  ['.bin', '.type'].forEach(ext => { try { fs.unlinkSync(path.join(RECEIPT_DIR, fileId + ext)); } catch (e) { /* already gone */ } });
+}
 
 const API = {
-  getMe(ctx) { return ctx.me; },
+  getMe(ctx) { return { name: ctx.me, owner: ctx.me === OWNER }; },
 
   getSnapshot(names) {
     const out = {};
@@ -145,10 +185,13 @@ const API = {
 
   setDoc(name, id, data) {
     assertName(name);
-    if (!id || typeof id !== 'string') throw new Error('缺少编号');
+    if (!id || typeof id !== 'string' || id.length > 120) throw new Error('缺少编号');
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('数据格式不正确');
+    validateDoc(name, data);
     return serial(() => {
       const m = load(name);
       m[id] = data;
+      if (name === 'audit') pruneAudit(m);
       save(name);
       return true;
     });
@@ -158,8 +201,10 @@ const API = {
     assertName(name);
     return serial(() => {
       const m = load(name);
+      const old = m[id];
       delete m[id];
       save(name);
+      if (name === 'tx' && old && old.receiptId) removeReceipt(old.receiptId);
       return true;
     });
   },
@@ -179,7 +224,8 @@ const API = {
 
   // Full backup / restore. Restore merges document by document (existing ids are overwritten, nothing is deleted).
   exportAll() { return API.getSnapshot(COLLECTIONS); },
-  importAll(data) {
+  importAll(ctx, data) {
+    if (ctx.me !== OWNER) throw new Error('只有 ' + OWNER + ' 可以恢复备份');
     if (!data || typeof data !== 'object') throw new Error('备份格式不正确');
     return serial(() => {
       let n = 0;
@@ -277,14 +323,13 @@ async function handle(req, res) {
 
 // Functions that need the caller as first argument are wrapped above; the rest take their arguments directly.
 for (const fn of Object.keys(API)) {
-  if (fn === 'getMe') continue;
+  if (fn === 'getMe' || fn === 'importAll') continue;
   const raw = API[fn];
   API[fn] = (ctx, ...args) => raw(...args);
 }
 
 // ---------- automatic month-end snapshot ----------
 // On the first run of a new month (checked every 6 h), lock last month's family totals if nobody did it by hand.
-const Logic = require('./src/logic.js');
 function withIds(m) { const o = {}; Object.keys(m).forEach(id => { o[id] = Object.assign({}, m[id], { id }); }); return o; }
 function autoSnapshot() {
   try {
@@ -293,10 +338,12 @@ function autoSnapshot() {
     if (snaps[prev]) return;
     const balances = load('balances');
     if (!Object.keys(balances).some(k => balances[k].month <= prev)) return;
-    const t = Logic.familyTotals(withIds(load('accounts')), balances, load('rates'), prev);
+    const accs = withIds(load('accounts')), rates = load('rates');
+    const t = Logic.familyTotals(accs, balances, rates, prev);
+    const biz = Logic.businessTotals(accs, balances, rates, prev);
     serial(() => {
       const r2 = n => Math.round(n * 100) / 100;
-      snaps[prev] = { month: prev, assets: r2(t.assets), liabs: r2(t.liabs), net: r2(t.net), liquid: r2(t.liquid), missing: t.missing, lockedAt: new Date().toISOString(), byId: 'auto', auto: true };
+      snaps[prev] = { month: prev, assets: r2(t.assets), liabs: r2(t.liabs), net: r2(t.net), liquid: r2(t.liquid), bizNet: r2(biz.net), missing: t.missing, lockedAt: new Date().toISOString(), byId: 'auto', auto: true };
       save('snapshots');
       const audit = load('audit');
       audit['auto-' + prev] = { at: new Date().toISOString(), byId: 'auto', action: '自动月结', ref: prev, summary: prev + ' 净资产 RM ' + r2(t.net).toLocaleString('en-MY') };
@@ -334,9 +381,45 @@ function autoPostRecurring() {
 setTimeout(autoPostRecurring, 8000);
 setInterval(autoPostRecurring, 3600e3).unref();
 
+// ---------- daily on-disk backup of the JSON collections (last 30 days kept) ----------
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+function dailyBackup() {
+  try {
+    const day = Logic.todayKuching();
+    const dir = path.join(BACKUP_DIR, day);
+    if (fs.existsSync(dir)) return;
+    fs.mkdirSync(dir, { recursive: true });
+    COLLECTIONS.forEach(n => { const f = path.join(DATA_DIR, n + '.json'); if (fs.existsSync(f)) fs.copyFileSync(f, path.join(dir, n + '.json')); });
+    fs.readdirSync(BACKUP_DIR).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().slice(0, -30).forEach(d => fs.rmSync(path.join(BACKUP_DIR, d), { recursive: true, force: true }));
+  } catch (e) { console.error('备份失败', e); }
+}
+setTimeout(dailyBackup, 3000);
+setInterval(dailyBackup, 6 * 3600e3).unref();
+
+// ---------- SGD→MYR rate for the current month, fetched once a day unless someone typed one by hand ----------
+function fetchRate() {
+  const m = Logic.nowMonth();
+  const rates = load('rates');
+  if (rates[m] && !rates[m].auto) return;
+  const req = https.get('https://open.er-api.com/v6/latest/SGD', { timeout: 10000 }, res => {
+    let body = '';
+    res.on('data', c => { body += c; });
+    res.on('end', () => {
+      try {
+        const j = JSON.parse(body);
+        const r = j && j.rates && Number(j.rates.MYR);
+        if (!(r > 0)) return;
+        serial(() => { rates[m] = { sgdMyr: Math.round(r * 10000) / 10000, auto: true, updatedAt: new Date().toISOString(), source: 'open.er-api.com' }; save('rates'); });
+      } catch (e) { /* ignore bad payload */ }
+    });
+  });
+  req.on('error', () => {}); req.on('timeout', () => req.destroy());
+}
+if (process.env.FAMILY_NO_FETCH !== '1') { setTimeout(fetchRate, 12000); setInterval(fetchRate, 24 * 3600e3).unref(); }
+
 server.listen(PORT, HOST, () => {
   const scheme = (process.env.TLS_CERT && process.env.TLS_KEY) ? 'https' : 'http';
   console.log('家庭资产服务已启动：' + scheme + '://' + HOST + ':' + PORT + '  数据目录：' + DATA_DIR);
 });
 
-module.exports = { API, KEYS, DATA_DIR, autoSnapshot };
+module.exports = { API, KEYS, DATA_DIR, OWNER, autoSnapshot, autoPostRecurring, dailyBackup, server };
