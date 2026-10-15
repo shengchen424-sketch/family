@@ -50,6 +50,12 @@ const api = (fn, args, key) => req('POST', '/api/' + fn + (key ? '?k=' + key : '
     assert.strictEqual(JSON.parse(viaCookie.body).result.name, 'Liza');
   });
 
+  await t('logout clears the HttpOnly cookie', async () => {
+    const r = await req('GET', '/logout', null, { cookie: 'k=ownerkey123' });
+    assert.strictEqual(r.status, 302);
+    assert.ok(/Max-Age=0/.test(r.headers['set-cookie'][0]));
+  });
+
   await t('setDoc validates transactions, balances and accounts', async () => {
     let r = await api('setDoc', ['tx', 't1', { type: 'expense', date: '2026-10-05', month: '2026-10', amount: 0, category: '饮食' }], 'ownerkey123');
     assert.strictEqual(r.j.ok, false); assert.ok(/金额/.test(r.j.error));

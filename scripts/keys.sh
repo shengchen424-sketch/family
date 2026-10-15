@@ -16,7 +16,7 @@ cmd="${1:-list}"; name="${2:-}"
 case "$cmd" in
   list)
     echo "密钥文件里的成员："; grep -v '^#' "$KEYS_FILE" | awk -F: 'NF>=2{print "  - "$2}'
-    if grep -q 'FAMILY_KEYS=' "$UNIT" 2>/dev/null; then echo "注意：systemd 单元里还有临时密钥（$(grep -o 'FAMILY_KEYS=[^ ]*' "$UNIT" | sed 's/FAMILY_KEYS=//; s/:[^,]*/:…/g')），正式使用前运行 remove-temp。"; fi ;;
+    if grep -q 'FAMILY_KEYS=' "$UNIT" 2>/dev/null; then echo "注意：systemd 单元里还有临时密钥（属于：$(grep -o 'FAMILY_KEYS=[^ ]*' "$UNIT" | sed 's/FAMILY_KEYS=//' | tr ',' '\n' | cut -d: -f2 | paste -sd,)），正式使用前运行 remove-temp。"; fi ;;
   add|rotate)
     [ -n "$name" ] || { echo "用法：keys.sh $cmd 名字"; exit 1; }
     if [ "$cmd" = add ] && grep -q ":$name\$" "$KEYS_FILE"; then echo "$name 已有密钥，用 rotate 更换"; exit 1; fi

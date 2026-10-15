@@ -325,6 +325,10 @@ async function handle(req, res) {
     return send(res, 200, fs.readFileSync(file), { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=604800' });
   }
   if (req.method === 'GET' && url.pathname === '/favicon.ico') return send(res, 204, '');
+  // Logout: the cookie is HttpOnly, so only the server can clear it; then back to the login screen.
+  if (req.method === 'GET' && url.pathname === '/logout') {
+    return send(res, 302, '', { Location: '/', 'Set-Cookie': 'k=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0' });
+  }
   // Play Store (TWA) verification file and the privacy policy page, both public
   if (req.method === 'GET' && (url.pathname === '/.well-known/assetlinks.json' || url.pathname === '/privacy.html')) {
     const file = path.join(PUBLIC_DIR, url.pathname.slice(1));

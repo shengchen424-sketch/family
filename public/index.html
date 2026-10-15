@@ -3284,7 +3284,7 @@ $('fFx').addEventListener('input', fxToRm);
 $('fCat').addEventListener('change', renderChips);
 $('loginBtn').addEventListener('click', doLogin);
 $('loginKey').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
-$('logoutBtn').addEventListener('click', function () { if (window.FamilyKey) window.FamilyKey.clear(); document.cookie = 'k=; Path=/; Max-Age=0'; location.href = '/'; });
+$('logoutBtn').addEventListener('click', function () { if (window.FamilyKey) window.FamilyKey.clear(); location.href = '/logout'; });
 $('backupBtn').addEventListener('click', backupAll);
 $('restoreFile').addEventListener('change', restoreBackup);
 $('rpExport').addEventListener('click', exportReport);
