@@ -21,7 +21,7 @@
 *{box-sizing:border-box}
 html,body{margin:0}
 body{background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,system-ui,"PingFang SC","Noto Sans SC",sans-serif}
-.wrap{max-width:820px;margin:0 auto;padding-block:16px 70px;
+.wrap{max-width:820px;margin:0 auto;padding-block:16px 96px;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 h1{font-size:19px;margin:0;font-weight:650}
 h2{font-size:15px;margin:0 0 8px;font-weight:650}
@@ -113,7 +113,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .hist li{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;font-variant-numeric:tabular-nums}
 .hist li span:last-child{color:var(--muted);text-align:right}
 .notice{background:var(--surface);border:1px dashed var(--line);border-radius:10px;padding:18px;color:var(--muted);text-align:center}
-.toast{position:fixed;left:50%;bottom:max(20px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:8px;z-index:20;font-size:13px;max-width:90vw}
+.toast{position:fixed;left:50%;bottom:calc(78px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:8px;z-index:20;font-size:13px;max-width:90vw}
 .toast[hidden]{display:none}
 .prev{font-size:12.5px;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px}
 .prev div{display:grid;grid-template-columns:90px minmax(0,1fr) 100px;gap:8px;padding:6px 8px;border-top:1px solid var(--line)}
@@ -156,6 +156,22 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .delta{font-size:11.5px;color:var(--muted)}
 .delta.up{color:var(--neg)}
 .delta.down{color:var(--ok)}
+.tabs{display:none}
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:9;display:flex;justify-content:space-around;background:var(--surface);border-top:1px solid var(--line);padding:4px 0 max(4px,env(safe-area-inset-bottom,0px))}
+.nav button{flex:1 1 0;background:none;border:0;font:inherit;font-size:11px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0;cursor:pointer;min-width:0}
+.nav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.nav button[aria-selected="true"]{color:var(--accent);font-weight:600}
+.nav button.add span.ic{width:44px;height:44px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:flex;align-items:center;justify-content:center;margin-top:-18px;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.nav button.add span.ic svg{width:24px;height:24px;stroke:var(--accent-ink)}
+@media (min-width:820px){.tabs{display:flex}.nav{display:none}.wrap{padding-bottom:40px}.toast{bottom:24px}}
+.more{display:grid;gap:8px}
+.more button{text-align:left;display:flex;justify-content:space-between;align-items:center}
+.ins{display:flex;flex-direction:column;gap:6px}
+.ins div{display:flex;gap:8px;align-items:flex-start;font-size:13px}
+.ins i{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:6px;background:var(--muted)}
+.ins i.ok{background:var(--ok)}.ins i.warn{background:var(--warn)}
+.toast.err{background:var(--neg);color:#fff}
+.bar-fill.goal{background:var(--biz)}
 </style>
 
 <main class="wrap">
@@ -192,6 +208,9 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
   <!-- ===== 总览 ===== -->
   <section class="view" id="v-overview">
     <section class="cards" id="cards"></section>
+    <div class="panel" id="budgetBox"></div>
+    <div class="panel" id="insightBox"></div>
+    <div class="panel" id="goalBox" hidden></div>
     <div class="panel" id="emergency"></div>
     <div class="panel">
       <h2>资产结构（家庭）</h2>
@@ -324,6 +343,11 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 
     <h3>本月待确认的定期项目</h3>
     <ul class="list" id="pendingRec"></ul>
+    <div class="bar-row" style="margin-top:8px"><button class="btn small" id="confirmAllBtn" hidden>全部确认记账</button></div>
+
+    <h3>储蓄目标</h3>
+    <ul class="list" id="goalList"></ul>
+    <div class="bar-row" style="margin-top:8px"><button class="btn small" data-act="new-goal">+ 新增目标</button></div>
 
     <h3>定期项目（月供、保费、订阅、固定收入）</h3>
     <ul class="list" id="recList"></ul>
@@ -396,7 +420,17 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 
     <div class="panel">
       <h2>成员</h2>
-      <div id="memberList" class="muted"></div>
+      <ul class="list" id="memberList"></ul>
+      <div class="bar-row" style="margin-top:8px"><button class="btn small" data-act="new-member">+ 添加成员</button></div>
+    </div>
+
+    <div class="panel">
+      <h2>偏好</h2>
+      <div class="form">
+        <label>每月总预算（RM，0 = 用各分类预算之和）<input id="setBudget" type="number" step="1" inputmode="decimal"></label>
+        <label>紧急备用金目标（月数）<input id="setEmerg" type="number" min="1" max="24" inputmode="numeric"></label>
+      </div>
+      <div class="acts"><button class="btn primary" id="setSave">保存偏好</button></div>
     </div>
   </section>
 </main>
@@ -406,6 +440,10 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
   <div class="panelbox" role="dialog" aria-modal="true" aria-labelledby="aTitle">
     <div class="ph"><div><h2 id="aTitle"></h2><div class="muted" id="aMeta"></div></div><button class="btn small" data-close>关闭</button></div>
     <div class="fields">
+      <label>名称<input id="aName" type="text" maxlength="60"></label>
+      <label>分类<input id="aCat" type="text" maxlength="30" list="catNames"><datalist id="catNames"><option value="现金与定存"><option value="投资"><option value="保险"><option value="房产"><option value="车辆"><option value="退休金"><option value="房贷"><option value="车贷"><option value="个人贷款"><option value="企业现金"><option value="企业透支"></datalist></label>
+      <label>归属<select id="aGroup"><option value="family">家庭</option><option value="business">企业（不计入家庭）</option></select></label>
+      <label>排序（小的在前）<input id="aSort" type="number" step="1" inputmode="numeric"></label>
       <label><span id="aAmtLabel">余额</span><input id="aAmt" type="number" step="0.01" inputmode="decimal"></label>
       <label>截至日期<input id="aAsOf" type="date"></label>
       <label class="full">备注<input id="aNote" type="text" maxlength="120"></label>
@@ -503,6 +541,55 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
   </div>
 </div>
 
+<!-- Bottom navigation (phones) -->
+<nav class="nav" id="nav" aria-label="主导航">
+  <button data-tab="overview" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>总览</button>
+  <button data-tab="balances" aria-selected="false"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/></svg>余额</button>
+  <button data-tab="entry" class="add" aria-selected="false"><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>记账</button>
+  <button data-tab="ledger" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>流水</button>
+  <button data-more aria-selected="false"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>更多</button>
+</nav>
+<div class="sheet" id="moreSheet" hidden>
+  <div class="panelbox" role="dialog" aria-modal="true">
+    <div class="ph"><h2>更多</h2><button class="btn small" data-close>关闭</button></div>
+    <div class="more">
+      <button class="btn" data-tab="report"><span>报表 · 分类、成员、账户、年度</span><span>›</span></button>
+      <button class="btn" data-tab="plan"><span>预算、定期项目、目标、提醒</span><span>›</span></button>
+      <button class="btn" data-tab="settings"><span>导入账单、备份、成员、设置</span><span>›</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Goal sheet -->
+<div class="sheet" id="goalSheet" hidden>
+  <div class="panelbox" role="dialog" aria-modal="true">
+    <div class="ph"><h2 id="gTitle">储蓄目标</h2><button class="btn small" data-close>关闭</button></div>
+    <div class="fields">
+      <label>名称<input id="gName" type="text" maxlength="40" placeholder="例如：紧急备用金、Uning 教育金、日本旅行"></label>
+      <label>目标金额（RM）<input id="gTarget" type="number" step="0.01" inputmode="decimal"></label>
+      <label>关联账户（用它的余额算进度，可空）<select id="gAcc"></select></label>
+      <label>已存金额（不关联账户时填）<input id="gSaved" type="number" step="0.01" inputmode="decimal"></label>
+      <label>目标月份（可空）<input id="gMonth" type="month"></label>
+    </div>
+    <div class="acts">
+      <button class="btn danger" id="gDel" hidden>删除</button>
+      <button class="btn primary" id="gSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Member sheet -->
+<div class="sheet" id="memSheet" hidden>
+  <div class="panelbox" role="dialog" aria-modal="true">
+    <div class="ph"><h2 id="memTitle">成员</h2><button class="btn small" data-close>关闭</button></div>
+    <div class="fields">
+      <label>名字<input id="memName" type="text" maxlength="30"></label>
+      <label>编号（与访问密钥的名字一致才会自动匹配录入人）<input id="memId" type="text" maxlength="30" placeholder="例如 Chen、Liza"></label>
+    </div>
+    <div class="acts"><button class="btn primary" id="memSave">保存</button></div>
+  </div>
+</div>
+
 <!-- Receipt viewer -->
 <div class="sheet" id="receiptSheet" hidden>
   <div class="panelbox" role="dialog" aria-modal="true" aria-labelledby="rcTitle">
@@ -532,7 +619,8 @@ var KIND_LABEL = { asset: '资产', liability: '负债' };
 
 var S = {
   db: null, user: null, uid: null, downloads: null,
-  accounts: {}, balances: {}, rates: {}, tx: {}, recurring: {}, categories: {}, members: {}, reminders: {}, snapshots: {}, audit: [],
+  accounts: {}, balances: {}, rates: {}, tx: {}, recurring: {}, categories: {}, members: {}, reminders: {}, snapshots: {}, goals: {}, settings: {}, audit: [],
+  editGoalId: null, editMemId: null,
   month: L.nowMonth(), tab: 'overview',
   entryType: 'expense', editTxId: null, editAccId: null, editRecId: null, editCatId: null, editRemId: null,
   ledger: { month: '', member: '', type: '', q: '', cat: '', acc: '' },
@@ -555,14 +643,15 @@ function memberName(id) {
   if (id === 'shared') return '共同';
   var m = S.members[id]; return m ? m.name : (id || '未指定');
 }
+function prefs() { return S.settings.prefs || {}; }
 function errText(e) {
   var map = { invalid_argument: '数据格式有误或没有权限', quota_exceeded: '存储已满，请联系管理员', resource_exhausted: '操作太频繁，请稍后再试', revoked: '没有写入权限', not_granted: '没有数据权限，请重新打开页面' };
   return map[e && e.code] || '保存失败，请重试';
 }
 var toastTimer;
-function toast(msg) {
-  var t = $('toast'); t.textContent = msg; t.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.hidden = true; }, 2300);
+function toast(msg, long) {
+  var t = $('toast'); t.textContent = msg; t.hidden = false; t.classList.toggle('err', !!long);
+  clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.hidden = true; }, long ? 4500 : 2300);
 }
 function closeSheets() { document.querySelectorAll('.sheet').forEach(function (s) { s.hidden = true; }); }
 function fillSelect(sel, items, opts) {
@@ -607,6 +696,7 @@ function fillAll() {
   var nl = notes.map(function (n) { return '<option value="' + esc(n) + '"></option>'; }).join('');
   if ($('noteList').innerHTML !== nl) $('noteList').innerHTML = nl;
   fillSelect($('iAcc'), accOpts(), { keep: true });
+  fillSelect($('gAcc'), [{ value: '', label: '（不关联）' }].concat(accOpts('asset')), { keep: true });
   fillSelect($('iMember'), memberOpts(true), { keep: true });
   fillSelect($('iCatExp'), catOpts('expense'), { keep: true });
   fillSelect($('iCatInc'), catOpts('income'), { keep: true });
@@ -643,11 +733,29 @@ function renderOverview() {
     card('待录入余额', (t.missing + t.carried) + ' 项', '', t.missing + ' 未录入 · ' + t.carried + ' 沿用旧值')
   ].join('');
 
-  var pct = em == null ? 0 : Math.min(100, em / 6 * 100);
+  var emTarget = Number(prefs().emergencyMonths) || 6;
+  var pct = em == null ? 0 : Math.min(100, em / emTarget * 100);
   $('emergency').innerHTML = '<h2>紧急备用金</h2>' +
     '<div class="muted">' + (em == null ? '本期还没有支出记录，无法估算。' : '可动用现金约够 <b class="num">' + em.toFixed(1) + '</b> 个月开支（近 3 个月平均支出 ' + rm(avg) + '）。') + '</div>' +
     '<div class="bar-track"><div class="bar-fill ' + (em != null && em < 3 ? 'warn' : '') + '" style="width:' + pct.toFixed(1) + '%"></div></div>' +
-    '<div class="muted" style="margin-top:4px">目标：6 个月（必要开支 + 月供）。</div>';
+    '<div class="muted" style="margin-top:4px">目标：' + emTarget + ' 个月（必要开支 + 月供）。</div>';
+
+  var bs = L.budgetSummary(catList('expense'), txs, m, prefs().monthlyBudget);
+  if (bs.budget > 0) {
+    var bp = Math.min(100, (bs.pct || 0) * 100);
+    $('budgetBox').hidden = false;
+    $('budgetBox').innerHTML = '<h2>本月预算</h2><div class="trow"><span>已用 ' + rm(bs.spent) + ' / ' + rm(bs.budget) + '</span><span class="v ' + (bs.remaining < 0 ? 'neg' : '') + '">' + (bs.remaining < 0 ? '超支 ' + rm(-bs.remaining) : '还可花 ' + rm(bs.remaining)) + '</span>' +
+      '<div class="bar-track"><div class="bar-fill ' + (bs.remaining < 0 ? 'over' : bs.paceOk === false ? 'warn' : '') + '" style="width:' + bp.toFixed(1) + '%"></div></div></div>' +
+      '<div class="muted">' + (bs.daily != null ? '剩余 ' + bs.daysLeft + ' 天，平均每天可花 <b class="num">' + rm(bs.daily) + '</b>' + (bs.paceOk === false ? '，目前花得比进度快' : '，进度正常') : bs.daysLeft === 0 ? '本月已结束' : '') + '</div>';
+  } else { $('budgetBox').hidden = true; }
+
+  var ins = L.insights(txs, m);
+  $('insightBox').hidden = !ins.length;
+  $('insightBox').innerHTML = '<h2>本月观察</h2><div class="ins">' + ins.map(function (x) { return '<div><i class="' + x.kind + '"></i><span>' + esc(x.text) + '</span></div>'; }).join('') + '</div>';
+
+  var goals = arr(S.goals);
+  $('goalBox').hidden = !goals.length;
+  $('goalBox').innerHTML = '<h2>储蓄目标</h2>' + goals.map(function (g) { return goalRow(g, m, false); }).join('');
 
   var cats = t.byCategory, total = t.assets;
   var keys = Object.keys(cats).sort(function (a, b) { return cats[b] - cats[a]; });
@@ -690,6 +798,61 @@ function renderOverview() {
   });
   $('pending').innerHTML = items.length ? '<ul class="list">' + items.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul>' : '<span class="muted">没有待处理事项。</span>';
   $('subline').textContent = '余额 RM 统一折算。企业账户单独显示，只有提款计入家庭收入。';
+}
+
+// ---------- goals ----------
+function goalRow(g, m, withBtn) {
+  var p = L.goalProgress(g, S.accounts, S.balances, S.rates, m);
+  var sub = p.done ? '已达成 🎉' : '还差 ' + rm(p.remaining) + (p.perMonth != null ? ' · 到 ' + g.targetMonth + ' 每月需存 ' + rm(p.perMonth) : p.monthsLeft === 0 && g.targetMonth ? ' · 已到目标月份' : '') + (g.accountId ? ' · 按 ' + accName(g.accountId) + ' 余额' : '');
+  var inner = '<span class="n"><b>' + esc(g.name) + '</b><small>' + esc(sub) + '</small></span><span class="v"><b class="num">' + num(p.current) + ' / ' + num(p.target) + '</b><span class="st">' + (p.pct * 100).toFixed(0) + '%</span></span>';
+  var bar = '<div class="bar-track"><div class="bar-fill goal" style="width:' + (p.pct * 100).toFixed(1) + '%"></div></div>';
+  if (withBtn) return '<li class="li" style="display:block"><button class="row" data-act="open-goal" data-id="' + esc(g.id) + '" style="padding:0;width:100%">' + inner + '</button>' + bar + '</li>';
+  return '<div class="trow" style="display:block"><div class="li" style="padding:6px 0">' + inner + '</div>' + bar + '</div>';
+}
+function openGoal(id) {
+  S.editGoalId = id || null;
+  var g = id ? S.goals[id] : null;
+  fillAll();
+  $('gTitle').textContent = g ? '修改目标' : '新增储蓄目标';
+  $('gName').value = g ? g.name : ''; $('gTarget').value = g ? g.target : ''; $('gSaved').value = g && g.saved ? g.saved : '';
+  $('gAcc').value = g && g.accountId ? g.accountId : ''; $('gMonth').value = g && g.targetMonth ? g.targetMonth : '';
+  $('gDel').hidden = !g; $('gDel').textContent = '删除';
+  $('goalSheet').hidden = false;
+}
+async function saveGoal() {
+  var body = { name: $('gName').value.trim(), target: round2(Number($('gTarget').value)), accountId: $('gAcc').value || null,
+    saved: round2(Number($('gSaved').value) || 0), targetMonth: $('gMonth').value || null, updatedAt: new Date().toISOString() };
+  if (!body.name) return toast('请输入名称');
+  if (!(body.target > 0)) return toast('目标金额必须大于 0');
+  try {
+    if (S.editGoalId) await S.db.collection('goals').doc(S.editGoalId).set(body); else await S.db.collection('goals').add(body);
+    audit('保存目标', S.editGoalId || '', body.name + ' ' + rm(body.target));
+    closeSheets(); toast('已保存');
+  } catch (e) { toast(errText(e)); }
+}
+
+// ---------- members ----------
+function openMember(id) {
+  S.editMemId = id || null;
+  var mem = id ? S.members[id] : null;
+  $('memTitle').textContent = mem ? '修改成员' : '添加成员';
+  $('memName').value = mem ? mem.name : ''; $('memId').value = id || ''; $('memId').disabled = !!mem;
+  $('memSheet').hidden = false;
+}
+async function saveMember() {
+  var name = $('memName').value.trim(), id = (S.editMemId || $('memId').value.trim() || name).replace(/[^\w\u4e00-\u9fa5-]/g, '');
+  if (!name) return toast('请输入名字');
+  if (!id) return toast('编号不正确');
+  if (!S.editMemId && S.members[id]) return toast('这个编号已存在');
+  try {
+    await S.db.collection('members').doc(id).set({ name: name, sort: S.editMemId ? (S.members[id].sort || 0) : Object.keys(S.members).length + 1 });
+    audit('保存成员', id, name); closeSheets(); toast('已保存');
+  } catch (e) { toast(errText(e)); }
+}
+async function savePrefs() {
+  var body = Object.assign({}, prefs(), { monthlyBudget: round2(Number($('setBudget').value) || 0), emergencyMonths: Math.min(24, Math.max(1, Number($('setEmerg').value) || 6)), updatedAt: new Date().toISOString() });
+  try { await S.db.collection('settings').doc('prefs').set(body); audit('保存偏好', 'prefs', '预算 ' + body.monthlyBudget); toast('已保存'); }
+  catch (e) { toast(errText(e)); }
 }
 
 // ---------- charts (inline SVG, no library) ----------
@@ -823,6 +986,10 @@ function renderBalances() {
     var label = r.status === 'fresh' ? '已更新' : r.status === 'carried' ? '沿用 ' + r.month : '未录入';
     var sub = [a.category, a.currency !== 'MYR' && r.amount != null ? a.currency + ' ' + num(r.amount) : null].filter(Boolean).join(' · ');
     var val = r.rm == null ? '—' : rm(r.rm);
+    if (a.kind === 'asset' && a.category === '现金与定存' && r.amount != null) {
+      var ce = L.cashEstimate(a, S.balances, txs, m);
+      if (ce && ce.n > 0) sub += ' · 按流水估算 ' + num(ce.estimate) + '（' + (ce.delta >= 0 ? '+' : '') + num(ce.delta) + '）';
+    }
     if (a.kind === 'liability' && r.amount != null && a.group === 'family') {
       var lb = L.loanBalance(a, S.balances, txs, m);
       if (lb.paid > 0) sub += ' · 估算余额 ' + num(lb.estimate) + '（已还本金 ' + num(lb.paid) + '）';
@@ -923,6 +1090,9 @@ async function saveEntry() {
   if (tx.type === 'repayment' && tx.principal < 0) return toast('利息不能大于还款总额');
   var err = L.validateTx(tx);
   if (err) return toast(err);
+  var sim = L.findSimilar(txArr(), tx, S.editTxId);
+  if (sim.length && S._dupWarned !== tx.date + tx.amount) { S._dupWarned = tx.date + tx.amount; return toast('今天已有一笔相同金额、分类的记录，确认不是重复请再点一次保存', true); }
+  S._dupWarned = null;
   var now = new Date().toISOString();
   var prevTx = S.editTxId ? (S.tx[S.editTxId] || {}) : {};
   tx.receiptId = S.receipt.removed ? null : (S.receipt.fileId || prevTx.receiptId || null);
@@ -1129,6 +1299,8 @@ function renderPlan() {
       '<span class="acts"><button class="btn small primary" data-act="confirm-rec" data-id="' + esc(x.key) + '">确认记账</button></span></li>';
   }).join('') || '<li class="empty">本月没有待确认项目</li>';
   if (pend.length && pend.every(function (x) { return x.done; })) $('pendingRec').innerHTML = '<li class="empty">本月定期项目已全部确认</li>';
+  $('confirmAllBtn').hidden = pend.filter(function (x) { return !x.done; }).length < 2;
+  $('goalList').innerHTML = arr(S.goals).map(function (g) { return goalRow(g, m, true); }).join('') || '<li class="empty">还没有储蓄目标。例如：紧急备用金 6 个月开支、Uning 教育金。</li>';
 
   $('recList').innerHTML = recArr().sort(function (a, b) { return (a.dayOfMonth || 0) - (b.dayOfMonth || 0); }).map(function (r) {
     return '<li><button class="row" data-act="open-rec" data-id="' + esc(r.id) + '"><span class="n"><b>' + esc(r.name) + '</b><small>每月 ' + (r.dayOfMonth || 1) + ' 号 · ' + esc(TYPE_LABEL[r.type]) + ' · ' + esc(accName(r.account)) + (r.startMonth ? ' · 从 ' + r.startMonth : '') + (r.endMonth ? ' 至 ' + r.endMonth : '') + (r.active === false ? ' · 已停用' : '') + '</small></span><span class="v"><b>' + rm(r.amount) + '</b></span></button></li>';
@@ -1273,6 +1445,7 @@ function openAcc(id) {
   var b = v.b;
   $('aTitle').textContent = a.name;
   $('aMeta').textContent = GROUP_LABEL[a.group] + ' · ' + KIND_LABEL[a.kind] + ' · ' + a.currency + (a.category ? ' · ' + a.category : '');
+  $('aName').value = a.name; $('aCat').value = a.category || ''; $('aGroup').value = a.group || 'family'; $('aSort').value = a.sort || 0;
   $('aAmtLabel').textContent = a.currency + ' 原币余额（' + S.month + '）' + (a.kind === 'liability' ? '，负债请填正数' : '');
   $('aAmt').value = b ? b.amount : '';
   $('aAsOf').value = b && b.month === S.month ? (b.asOf || b.month + '-01') : (S.month === L.nowMonth() ? L.todayKuching() : L.dateInMonth(S.month, 31));
@@ -1316,8 +1489,14 @@ async function saveAcc() {
   if (!isFinite(val) || val < 0) return toast('请输入有效金额');
   var asOf = $('aAsOf').value;
   if (!L.isDate(asOf)) return toast('截至日期不正确');
+  var name = $('aName').value.trim(); if (!name) return toast('请输入名称');
   var body = { month: S.month, asOf: asOf, accountId: a.id, amount: val, currency: a.currency, note: $('aNote').value.trim(), byId: S.uid, updatedAt: new Date().toISOString() };
   try {
+    var meta = { name: name, category: $('aCat').value.trim(), group: $('aGroup').value, sort: Number($('aSort').value) || 0 };
+    if (meta.name !== a.name || meta.category !== (a.category || '') || meta.group !== a.group || meta.sort !== (a.sort || 0)) {
+      await S.db.collection('accounts').doc(a.id).update(meta);
+      audit('修改账户', a.id, a.name + ' → ' + meta.name + ' · ' + meta.category);
+    }
     await S.db.collection('balances').doc(S.month + '__' + a.id).set(body);
     if (a.kind === 'liability') {
       var upd = {
@@ -1385,7 +1564,11 @@ function renderSettings() {
     var who = (S.names[a.byId] && S.names[a.byId].name) || '有人';
     return '<li class="li"><span class="n"><b>' + esc(a.summary || a.action) + '</b><small>' + esc((a.at || '').replace('T', ' ').slice(0, 16)) + ' · ' + esc(a.action) + ' · ' + esc(who) + '</small></span></li>';
   }).join('') || '<li class="empty">还没有修改记录</li>';
-  $('memberList').textContent = arr(S.members).map(function (m) { return m.name; }).join('、') || '未设置';
+  $('memberList').innerHTML = arr(S.members).sort(function (a, b) { return (a.sort || 0) - (b.sort || 0); }).map(function (m) {
+    return '<li><button class="row" data-act="open-member" data-id="' + esc(m.id) + '"><span class="n"><b>' + esc(m.name) + '</b><small>编号 ' + esc(m.id) + (m.id === S.uid ? ' · 我' : '') + '</small></span><span class="v">›</span></button></li>';
+  }).join('') || '<li class="empty">还没有成员</li>';
+  if (document.activeElement !== $('setBudget')) $('setBudget').value = prefs().monthlyBudget || 0;
+  if (document.activeElement !== $('setEmerg')) $('setEmerg').value = prefs().emergencyMonths || 6;
 }
 async function audit(action, ref, summary) {
   try { await S.db.collection('audit').add({ at: new Date().toISOString(), byId: S.uid, action: action, ref: ref || '', summary: summary || '' }); }
@@ -1589,6 +1772,7 @@ async function runImport() {
 function showTab(name) {
   S.tab = name;
   document.querySelectorAll('[data-tab]').forEach(function (b) { b.setAttribute('aria-selected', String(b.dataset.tab === name)); });
+  var moreBtn = document.querySelector('#nav [data-more]'); if (moreBtn) moreBtn.setAttribute('aria-selected', String(['report', 'plan', 'settings'].indexOf(name) >= 0));
   document.querySelectorAll('.view').forEach(function (v) { v.hidden = v.id !== 'v-' + name; });
   if (name === 'entry' && !S.editTxId) { fillAll(); setEntryType(S.entryType); if (!$('fDate').value) resetEntry(false); }
   render();
@@ -1627,7 +1811,8 @@ document.addEventListener('click', function (e) {
   var chip = e.target.closest('#catChips [data-chip]');
   if (chip) { $('fCat').value = chip.dataset.chip; renderChips(); return; }
   var tabBtn = e.target.closest('[data-tab]');
-  if (tabBtn) return showTab(tabBtn.dataset.tab);
+  if (tabBtn) { closeSheets(); return showTab(tabBtn.dataset.tab); }
+  if (e.target.closest('[data-more]')) { $('moreSheet').hidden = false; return; }
   var typeBtn = e.target.closest('#typeSeg [data-type]');
   if (typeBtn) { setEntryType(typeBtn.dataset.type); return; }
   var closeBtn = e.target.closest('[data-close]');
@@ -1661,6 +1846,10 @@ document.addEventListener('click', function (e) {
   if (a === 'done-rem') return S.db.collection('reminders').doc(id).update({ done: true }).then(function () { audit('完成提醒', id, ''); toast('已完成'); }).catch(function (x) { toast(errText(x)); });
   if (a === 'lock-snap') return lockSnapshot(act);
   if (a === 'seed') return seedData(act);
+  if (a === 'new-goal') return openGoal(null);
+  if (a === 'open-goal') return openGoal(id);
+  if (a === 'new-member') return openMember(null);
+  if (a === 'open-member') return openMember(id);
   if (a === 'view-receipt') { var vt = S.tx[id]; return vt && viewReceipt(vt.receiptId, vt.date + ' · ' + summaryOf(vt)); }
 });
 document.addEventListener('click', function (e) {
@@ -1677,12 +1866,13 @@ function armOrRun(key, fn) {
     return fn().catch(function (e) { toast(errText(e)); });
   }
   S.arm = key; S._armAt = Date.now();
-  setRecDelText(key.indexOf('del-rec') === 0);
+  setRecDelText(key.indexOf('del-rec') === 0 || key.indexOf('del-goal') === 0);
   render();
   setTimeout(function () { if (S.arm === key) { S.arm = null; setRecDelText(false); render(); } }, 4000);
 }
 function setRecDelText(armed) {
   $('rDel').textContent = armed ? '再点确认删除' : '删除';
+  $('gDel').textContent = armed ? '再点确认删除' : '删除';
 }
 
 $('fSave').addEventListener('click', saveEntry);
@@ -1709,6 +1899,11 @@ $('logoutBtn').addEventListener('click', function () { if (window.FamilyKey) win
 $('backupBtn').addEventListener('click', backupAll);
 $('restoreFile').addEventListener('change', restoreBackup);
 $('rpExport').addEventListener('click', exportReport);
+$('gSave').addEventListener('click', saveGoal);
+$('gDel').addEventListener('click', function () { if (S.editGoalId) armOrRun('del-goal:' + S.editGoalId, async function () { await S.db.collection('goals').doc(S.editGoalId).delete(); audit('删除目标', S.editGoalId, ''); closeSheets(); toast('已删除'); }); });
+$('memSave').addEventListener('click', saveMember);
+$('setSave').addEventListener('click', savePrefs);
+$('confirmAllBtn').addEventListener('click', function () { confirmAllRec().then(function () { toast('已全部记账'); }); });
 var deferredInstall = null;
 window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferredInstall = e; $('installBtn').hidden = false; });
 $('installBtn').addEventListener('click', function () { if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; $('installBtn').hidden = true; } });
@@ -1766,7 +1961,7 @@ async function init() {
       render();
     }, function (e) { toast(errText(e)); });
   }
-  ['accounts', 'balances', 'rates', 'tx', 'recurring', 'categories', 'members', 'reminders', 'snapshots']
+  ['accounts', 'balances', 'rates', 'tx', 'recurring', 'categories', 'members', 'reminders', 'snapshots', 'goals', 'settings']
     .forEach(function (n) { sub(n, n); });
   db.collection('audit').orderBy('at', 'desc').limit(50).onSnapshot(function (s) {
     S.audit = s.docs.filter(function (d) { return d.exists; }).map(function (d) { return d.data(); });

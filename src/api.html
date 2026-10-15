@@ -3,7 +3,7 @@
  * collection(name).doc(id).set/update/delete, collection.add, collection.orderBy/limit/onSnapshot.
  * Writes are applied locally at once, then sent to the server; the server copy is re-read every 15 s. */
 var Api = (function () {
-  var NAMES = ['accounts', 'balances', 'rates', 'tx', 'recurring', 'categories', 'members', 'reminders', 'snapshots', 'audit'];
+  var NAMES = ['accounts', 'balances', 'rates', 'tx', 'recurring', 'categories', 'members', 'reminders', 'snapshots', 'audit', 'goals', 'settings'];
   var cache = {};
   NAMES.forEach(function (n) { cache[n] = {}; });
   var subs = {};

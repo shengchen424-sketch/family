@@ -20,3 +20,8 @@ VPS 首次部署见 `family-assets.service` 注释。
 - 首次使用：「导入与设置」里一键导入 2026-10 期初数据（账户、余额、汇率、成员、分类）。
 - 记账时可拍照 / 选图附上收据，照片压缩到 1600px 后存到 `data/receipts/`，流水上显示「收据」按钮。
 - 「导入与设置」支持 CSV 和 PDF 对账单。PDF 用 pdf.js 3.11.174（`public/vendor/`，同源加载，不依赖外网），按带日期的行识别交易，余额变动判断收支方向；无法判断的行标为「待确认」，点该行可切换。有密码的 PDF 会提示输入。
+- 手机上是底部导航（总览 / 余额 / 记账 / 流水 / 更多），宽屏用顶部标签。页面本身不含数据，可以直接打开 `https://IP:8444/` 输入密钥；密钥存在手机 localStorage，可在「更多 → 设置」退出。
+- PWA：`public/manifest.webmanifest` + `public/sw.js`（缓存页面壳和 vendor，接口永远走网络），可“添加到主屏幕”。
+- 报表页：分类环图与环比、最大支出、成员、账户进出、年度表。总览有预算进度（每天可花多少）、本月观察、储蓄目标。
+- 贷款：在余额里填年利率和月供后，还款记账自动算利息，账户详情显示预计还清月份和剩余利息。
+- 备份：设置里导出全部 JSON / 合并恢复。集合：accounts balances rates tx recurring categories members reminders snapshots audit goals settings。

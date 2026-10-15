@@ -335,4 +335,53 @@ t('chart points scale into the box', () => {
   assert.strictEqual(c.points[0].y, 45);
 });
 
+// 11. Estimates, budgets, goals, insights
+t('cash estimate: last balance plus flows after asOf (RM accounts only)', () => {
+  const b = { 'x': { month: M, asOf: '2026-10-05', accountId: 'pb-joint', amount: 7000, currency: 'MYR' } };
+  const flows = [
+    { type: 'income', date: '2026-10-06', month: M, amount: 8000, account: 'pb-joint' },
+    { type: 'expense', date: '2026-10-07', month: M, amount: 100, account: 'pb-joint' },
+    { type: 'transfer', date: '2026-10-08', month: M, amount: 500, account: 'pb-joint', toAccount: 'hlb-liza' },
+    { type: 'expense', date: '2026-10-03', month: M, amount: 999, account: 'pb-joint' }
+  ];
+  const e = L.cashEstimate(accounts['pb-joint'], b, flows, M);
+  assert.strictEqual(e.estimate, 14400);
+  assert.strictEqual(e.n, 3);
+  assert.strictEqual(L.cashEstimate(accounts['ocbc-sg'], b, flows, M), null);
+});
+t('budget summary: overall budget, remaining, daily allowance', () => {
+  const cats = [{ name: '饮食', type: 'expense', budget: 1000 }, { name: '交通', type: 'expense', budget: 500 }];
+  const txs = [{ type: 'expense', month: M, amount: 600, category: '饮食' }];
+  const b = L.budgetSummary(cats, txs, M, 0, '2026-10-21');
+  assert.strictEqual(b.budget, 1500);
+  assert.strictEqual(b.remaining, 900);
+  assert.strictEqual(b.daysLeft, 11);
+  assert.ok(Math.abs(b.daily - 900 / 11) < 1e-9);
+  assert.strictEqual(L.budgetSummary(cats, txs, M, 3000, '2026-10-21').budget, 3000);
+  assert.strictEqual(L.budgetSummary(cats, txs, '2026-09', 0, '2026-10-21').daysLeft, 0);
+});
+t('goal progress from linked account and target month', () => {
+  const g = { target: 30000, accountId: 'hlb-liza', targetMonth: '2027-04' };
+  const p = L.goalProgress(g, accounts, balances, rates, M);
+  assert.strictEqual(p.current, 16111.71);
+  assert.strictEqual(p.monthsLeft, 6);
+  assert.ok(Math.abs(p.perMonth - (30000 - 16111.71) / 6) < 1e-6);
+  assert.strictEqual(L.goalProgress({ target: 100, saved: 150 }, {}, {}, {}, M).done, true);
+});
+t('insights: spend change and category jump', () => {
+  const txs = [
+    { type: 'expense', month: '2026-09', amount: 1000, category: '饮食' }, { type: 'expense', month: M, amount: 1500, category: '饮食' },
+    { type: 'income', month: M, amount: 5000, category: '工资' }
+  ];
+  const ins = L.insights(txs, M);
+  assert.ok(ins.some(x => /多 50%/.test(x.text)), JSON.stringify(ins));
+  assert.ok(ins.some(x => /饮食.*多花 500/.test(x.text)));
+  assert.ok(ins.some(x => /储蓄率 70%/.test(x.text)));
+});
+t('similar entries detected', () => {
+  const txs = [{ id: 'a', type: 'expense', date: M + '-02', amount: 23.5, category: '饮食', account: 'pb-joint' }];
+  assert.strictEqual(L.findSimilar(txs, { type: 'expense', date: M + '-02', amount: 23.5, category: '饮食', account: 'pb-joint' }).length, 1);
+  assert.strictEqual(L.findSimilar(txs, { type: 'expense', date: M + '-02', amount: 23.5, category: '饮食', account: 'pb-joint' }, 'a').length, 0);
+});
+
 console.log('\n' + passed + ' tests passed');

@@ -579,6 +579,77 @@
     };
   }
 
+  // ---------- estimates, budgets, goals, insights ----------
+  // Cash/deposit account: last recorded balance plus the recorded flows after its asOf date (RM accounts only).
+  function cashEstimate(acc, balances, tx, m) {
+    if (!acc || acc.currency !== 'MYR' || acc.kind !== 'asset') return null;
+    var v = latestBalance(balances, acc.id, m);
+    if (!v) return null;
+    var asOf = asOfOf(v), delta = 0, n = 0;
+    (tx || []).forEach(function (t) {
+      if (!(t.date > asOf) || t.month > m) return;
+      var a = Number(t.amount) || 0;
+      if (t.type === 'income' && t.account === acc.id) { delta += a; n++; }
+      else if ((t.type === 'expense' || t.type === 'repayment') && t.account === acc.id) { delta -= a; n++; }
+      else if (t.type === 'transfer') { if (t.account === acc.id) { delta -= a; n++; } if (t.toAccount === acc.id) { delta += a; n++; } }
+    });
+    return { base: v.amount, asOf: asOf, delta: round2(delta), n: n, estimate: round2(v.amount + delta) };
+  }
+  // Overall month budget: `overall` (when > 0) or the sum of category budgets. Daily allowance uses the days left in m.
+  function budgetSummary(categories, tx, m, overall, today) {
+    var sum = (categories || []).reduce(function (s, c) { return s + (c.type === 'expense' ? Number(c.budget) || 0 : 0); }, 0);
+    var budget = Number(overall) > 0 ? Number(overall) : sum;
+    var spent = cashflow(tx, m).expense;
+    today = today || todayKuching();
+    var dim = daysInMonth(m), day = today.slice(0, 7) === m ? Number(today.slice(8)) : (today.slice(0, 7) > m ? dim : 0);
+    var daysLeft = Math.max(0, dim - day + (today.slice(0, 7) === m ? 1 : 0));
+    var remaining = budget - spent;
+    return { budget: budget, spent: spent, remaining: remaining, pct: budget > 0 ? spent / budget : null,
+      daysLeft: daysLeft, daily: budget > 0 && daysLeft > 0 ? Math.max(0, remaining) / daysLeft : null,
+      paceOk: budget > 0 ? spent <= budget * (dim - daysLeft) / dim + 1e-9 : null };
+  }
+  // Savings goal progress. current = linked account value (RM) or goal.saved. Months left to goal.targetMonth.
+  function goalProgress(goal, accounts, balances, rates, m) {
+    var current = Number(goal.saved) || 0;
+    if (goal.accountId && accounts[goal.accountId]) {
+      var r = accountValues({ a: accounts[goal.accountId] }, balances, rates, m)[0];
+      if (r && r.rm != null) current = r.rm;
+    }
+    var target = Number(goal.target) || 0;
+    var pct = target > 0 ? Math.min(1, current / target) : 0;
+    var monthsLeft = null, perMonth = null;
+    if (goal.targetMonth) {
+      var p1 = m.split('-').map(Number), p2 = goal.targetMonth.split('-').map(Number);
+      monthsLeft = Math.max(0, (p2[0] - p1[0]) * 12 + (p2[1] - p1[1]));
+      perMonth = monthsLeft > 0 ? Math.max(0, target - current) / monthsLeft : null;
+    }
+    return { current: current, target: target, pct: pct, remaining: Math.max(0, target - current), monthsLeft: monthsLeft, perMonth: perMonth, done: target > 0 && current >= target };
+  }
+  // Plain-language observations about month m compared with the month before.
+  function insights(tx, m) {
+    var out = [];
+    var cur = cashflow(tx, m), prev = cashflow(tx, addMonths(m, -1));
+    if (prev.expense > 0 && cur.expense > 0) {
+      var ch = (cur.expense - prev.expense) / prev.expense;
+      if (Math.abs(ch) >= 0.05) out.push({ kind: ch > 0 ? 'warn' : 'ok', text: '本月支出比上月' + (ch > 0 ? '多 ' : '少 ') + Math.abs(ch * 100).toFixed(0) + '%（' + (ch > 0 ? '+' : '-') + Math.abs(cur.expense - prev.expense).toFixed(2) + '）' });
+    }
+    var rep = categoryReport(tx, m);
+    var up = rep.filter(function (r) { return r.prev > 0 && r.delta / r.prev >= 0.3 && r.delta >= 50; }).sort(function (a, b) { return b.delta - a.delta; })[0];
+    if (up) out.push({ kind: 'warn', text: '「' + up.name + '」比上月多花 ' + up.delta.toFixed(2) + '（+' + (up.delta / up.prev * 100).toFixed(0) + '%）' });
+    var down = rep.filter(function (r) { return r.prev > 0 && -r.delta / r.prev >= 0.3 && -r.delta >= 50; }).sort(function (a, b) { return a.delta - b.delta; })[0];
+    if (down) out.push({ kind: 'ok', text: '「' + down.name + '」比上月少花 ' + (-down.delta).toFixed(2) });
+    if (cur.savingsRate != null) out.push({ kind: cur.savingsRate >= 0.2 ? 'ok' : 'warn', text: '本月储蓄率 ' + (cur.savingsRate * 100).toFixed(0) + '%' + (cur.savingsRate >= 0.2 ? '，不错' : '，低于 20% 的建议线') });
+    if (rep.length) out.push({ kind: 'info', text: '花得最多的是「' + rep[0].name + '」，占支出 ' + (rep[0].pct * 100).toFixed(0) + '%' });
+    return out;
+  }
+  // Possible duplicate of a manual entry: same type, amount, date and category/account already recorded.
+  function findSimilar(tx, cand, excludeId) {
+    return (tx || []).filter(function (t) {
+      return t.id !== excludeId && t.type === cand.type && t.date === cand.date && Math.abs((Number(t.amount) || 0) - (Number(cand.amount) || 0)) < 0.005 &&
+        (t.category || '') === (cand.category || '') && (t.account || null) === (cand.account || null);
+    });
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -599,7 +670,8 @@
     parseStatement: parseStatement, flipRow: flipRow,
     round2: round2, estimateInterest: estimateInterest, monthsToPayoff: monthsToPayoff, totalInterestToPayoff: totalInterestToPayoff,
     monthExpenseByCategory: monthExpenseByCategory, categoryReport: categoryReport, accountFlow: accountFlow, yearSummary: yearSummary,
-    topExpenses: topExpenses, frequentCategories: frequentCategories, recentNotes: recentNotes, chartPoints: chartPoints
+    topExpenses: topExpenses, frequentCategories: frequentCategories, recentNotes: recentNotes, chartPoints: chartPoints,
+    cashEstimate: cashEstimate, budgetSummary: budgetSummary, goalProgress: goalProgress, insights: insights, findSimilar: findSimilar
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;
