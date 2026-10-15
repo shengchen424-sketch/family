@@ -25,7 +25,20 @@ function include(name) {
 function getMe() {
   var email = '';
   try { email = Session.getActiveUser().getEmail() || ''; } catch (e) {}
-  return email;
+  return { name: email, owner: email === Session.getEffectiveUser().getEmail() };
+}
+
+// Parity with server.js (the VPS build); the Apps Script build is kept as a fallback host.
+function getSeed() { return { accounts: [], rate: null, month: null }; }
+function exportAll() {
+  return getSnapshot(['accounts', 'balances', 'rates', 'tx', 'recurring', 'categories', 'members', 'reminders', 'snapshots', 'audit', 'goals', 'settings']);
+}
+function importAll(data) {
+  var n = 0;
+  Object.keys(data || {}).forEach(function (name) {
+    (data[name] || []).forEach(function (r) { if (r && r.id && r.data) { setDoc(name, r.id, r.data); n++; } });
+  });
+  return { imported: n };
 }
 
 function spreadsheet_() {

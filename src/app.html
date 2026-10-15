@@ -183,6 +183,15 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .cal button.today b{color:var(--accent)}
 .wk{margin-bottom:10px}
 .chk{display:flex;align-items:center;gap:6px;flex-direction:row;font-size:12.5px;color:var(--ink)}
+.card strong.long{font-size:14px}
+.monthnav{display:flex;align-items:flex-end;gap:4px}
+.monthnav .btn{padding:8px 9px}
+.sync{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin:-6px 0 10px}
+.sync button{background:none;border:0;color:var(--accent);font:inherit;font-size:12px;cursor:pointer;padding:0}
+.sync.off{color:var(--neg)}
+.welcome{background:var(--surface);border:1px solid var(--accent);border-radius:12px;padding:16px;margin-bottom:12px}
+.welcome ol{margin:8px 0 0;padding-left:20px}
+.welcome li{margin:4px 0}
 </style>
 
 <main class="wrap">
@@ -192,7 +201,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       <p class="sub" id="subline">余额 RM 统一折算。企业账户单独显示，只有提款计入家庭收入。</p>
     </div>
     <div class="ctrl">
-      <label>月份<input id="month" type="month"></label>
+      <div class="monthnav"><button class="btn" id="mPrev" type="button" aria-label="上一个月">‹</button><label>月份<input id="month" type="month"></label><button class="btn" id="mNext" type="button" aria-label="下一个月">›</button></div>
       <label><span id="rateLbl">SGD 兑 RM</span><input id="rate" type="number" step="0.0001" inputmode="decimal"></label>
     </div>
   </header>
@@ -207,6 +216,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     <button role="tab" data-tab="settings" aria-selected="false">导入与设置</button>
   </nav>
 
+  <div class="sync" id="sync" hidden><span id="syncText"></span><button type="button" id="syncBtn">刷新</button></div>
   <div id="notice" class="notice" hidden></div>
   <div id="login" class="login" hidden>
     <h2>输入访问密钥</h2>
@@ -218,7 +228,17 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 
   <!-- ===== 总览 ===== -->
   <section class="view" id="v-overview">
+    <div class="welcome" id="welcome" hidden>
+      <h2>欢迎，先把账本建起来</h2>
+      <div class="muted">三步开始：</div>
+      <ol>
+        <li><button class="btn small" data-act="goto" data-id="settings">导入 2026-10 期初数据</button> 或 <button class="btn small" data-act="new-acc">手动添加账户</button></li>
+        <li>每月在「余额」更新各账户余额（可批量）</li>
+        <li>平时用底部 ＋ 记每一笔开销，月底看报表</li>
+      </ol>
+    </div>
     <section class="cards" id="cards"></section>
+    <div class="acts" style="justify-content:flex-start;margin:-4px 0 12px"><button class="btn small" id="shareBtn">分享本月小结</button></div>
     <div class="panel" id="budgetBox"></div>
     <div class="panel" id="insightBox"></div>
     <div class="panel" id="goalBox" hidden></div>
@@ -747,10 +767,28 @@ function renderHeader() {
 
 // ---------- overview ----------
 function card(label, value, cls, sub) {
-  return '<div class="card ' + (cls || '') + '"><span>' + esc(label) + '</span><strong>' + esc(value) + '</strong>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div>';
+  return '<div class="card ' + (cls || '') + '"><span>' + esc(label) + '</span><strong class="' + (String(value).length > 13 ? 'long' : '') + '">' + esc(value) + '</strong>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div>';
+}
+function monthSummaryText() {
+  var m = S.month, txs = txArr();
+  var t = L.familyTotals(S.accounts, S.balances, S.rates, m), cf = L.cashflow(txs, m), rep = L.categoryReport(txs, m).slice(0, 5);
+  var lines = ['【家庭账本 ' + m + '】', '净资产 ' + rm(t.net) + '（资产 ' + rm(t.assets) + ' / 负债 ' + rm(t.liabs) + '）',
+    '本月收入 ' + rm(cf.income) + '，支出 ' + rm(cf.expense) + '，结余 ' + signed(cf.net) + (cf.savingsRate != null ? '，储蓄率 ' + (cf.savingsRate * 100).toFixed(0) + '%' : '')];
+  if (rep.length) lines.push('支出前几名：' + rep.map(function (r) { return r.name + ' ' + num(r.amount); }).join('、'));
+  var mem = L.spendByMember(txs, m), mk = Object.keys(mem);
+  if (mk.length) lines.push('按人：' + mk.map(function (k) { return memberName(k) + ' ' + num(mem[k]); }).join('、'));
+  if (t.missing + t.carried) lines.push('余额待更新 ' + (t.missing + t.carried) + ' 项');
+  return lines.join('\n');
+}
+function shareSummary() {
+  var text = monthSummaryText();
+  if (navigator.share) return navigator.share({ title: '家庭账本 ' + S.month, text: text }).catch(function () {});
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { toast('已复制到剪贴板'); }).catch(function () { prompt('复制下面的文字：', text); });
+  prompt('复制下面的文字：', text);
 }
 function renderOverview() {
   var m = S.month, txs = txArr();
+  $('welcome').hidden = Object.keys(S.accounts).length > 0;
   var t = L.familyTotals(S.accounts, S.balances, S.rates, m);
   var biz = L.businessTotals(S.accounts, S.balances, S.rates, m);
   var cf = L.cashflow(txs, m);
@@ -1338,8 +1376,11 @@ function renderLedger() {
   var shown = rows.slice(0, 300);
   var groups = {};
   shown.forEach(function (t) { (groups[t.date] = groups[t.date] || []).push(t); });
+  var WD = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
   var html = Object.keys(groups).sort().reverse().map(function (d) {
-    return '<div class="day">' + esc(d) + '</div><ul class="list">' + groups[d].map(function (t) {
+    var dayTot = groups[d].reduce(function (a, t) { return a + (t.type === 'expense' ? t.amount : t.type === 'repayment' ? (t.interest || 0) : 0); }, 0);
+    var wd = L.isDate(d) ? ' ' + WD[new Date(d + 'T00:00:00Z').getUTCDay()] : '';
+    return '<div class="day">' + esc(d + wd) + (dayTot ? '<span style="float:right;font-weight:500">支出 ' + num(dayTot) + '</span>' : '') + '</div><ul class="list">' + groups[d].map(function (t) {
       var sign = t.type === 'income' ? '+' : (t.type === 'expense' || t.type === 'repayment') ? '-' : '';
       var cls = t.type === 'income' ? 'pos' : (t.type === 'expense' || t.type === 'repayment') ? 'neg' : '';
       var title = t.type === 'transfer' ? accName(t.account) + ' → ' + accName(t.toAccount) : (t.note || t.category || TYPE_LABEL[t.type]);
@@ -2104,6 +2145,19 @@ $('installBtn').addEventListener('click', function () { if (deferredInstall) { d
 if ('serviceWorker' in navigator && location.protocol === 'https:') { navigator.serviceWorker.register('/sw.js').catch(function () {}); }
 $('exportBtn').addEventListener('click', exportCSV);
 $('month').addEventListener('change', function (e) { if (e.target.value) { S.month = e.target.value; render(); } });
+$('mPrev').addEventListener('click', function () { S.month = L.addMonths(S.month, -1); render(); });
+$('mNext').addEventListener('click', function () { S.month = L.addMonths(S.month, 1); render(); });
+$('shareBtn').addEventListener('click', shareSummary);
+$('syncBtn').addEventListener('click', function () { $('syncText').textContent = '正在刷新…'; window.Api.refresh(function (e) { setSync(e ? '无法连接服务器，显示的是上次数据' : '', !!e); }); });
+function setSync(msg, off) {
+  var el = $('sync');
+  if (!msg && !off) { el.hidden = true; el.classList.remove('off'); return; }
+  el.hidden = false; el.classList.toggle('off', !!off);
+  $('syncText').textContent = msg;
+}
+window.onFamilySync = function (off) { setSync(off ? '无法连接服务器，显示的是上次数据' : '', off); if (!off) toast('已重新连接'); };
+window.addEventListener('online', function () { setSync('', false); window.Api.refresh(); });
+window.addEventListener('offline', function () { setSync('离线中，修改会在联网后失败，请稍后重试', true); });
 $('rate').addEventListener('change', function (e) {
   var v = parseFloat(e.target.value);
   if (!isFinite(v) || v <= 0) return render();

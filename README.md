@@ -25,3 +25,12 @@ VPS 首次部署见 `family-assets.service` 注释。
 - 报表页：分类环图与环比、最大支出、成员、账户进出、年度表。总览有预算进度（每天可花多少）、本月观察、储蓄目标。
 - 贷款：在余额里填年利率和月供后，还款记账自动算利息，账户详情显示预计还清月份和剩余利息。
 - 备份：设置里导出全部 JSON / 合并恢复。集合：accounts balances rates tx recurring categories members reminders snapshots audit goals settings。
+
+## 服务端自动任务（server.js）
+
+- 每小时：定期项目勾选“到期自动入账”的，到日期自动记一笔（byId=auto）。
+- 每 6 小时：若上个月没有锁定快照，自动按当时余额锁定（含企业净现金）。
+- 每天：`data/backups/YYYY-MM-DD/` 存一份全部 JSON，保留 30 天；抓取 SGD→MYR 汇率写入当月（手动填过的不覆盖）。`FAMILY_NO_FETCH=1` 可关闭抓取。
+- 写入校验：流水、余额、账户、汇率、分类、定期、目标都在服务端校验；修改记录最多保留 2000 条；删除流水会一并删除收据文件。
+- 密钥保护：同一 IP 10 分钟内输错 8 次，封 15 分钟。只有 owner（第一把密钥的名字，或 `FAMILY_OWNER`）能恢复备份。
+- 测试：`npm test` 跑计算逻辑测试和服务端测试（服务端测试用临时目录和随机端口）。

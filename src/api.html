@@ -110,7 +110,7 @@ var Api = (function () {
   }
 
   var db = { collection: function (name) { return Col(name, {}); } };
-  var me = '', mePromise = null, isOwner = false;
+  var me = '', mePromise = null, isOwner = false, lastOffline = false;
   var user = {
     id: function () { return (mePromise || Promise.resolve()).then(function () { return me || null; }); },
     profiles: function (ids) {
@@ -130,7 +130,12 @@ var Api = (function () {
       }).withFailureHandler(function () { resolve(); }).getMe();
     });
     refresh(function (e) { if (e && !ready && onError) onError(e); });
-    setInterval(function () { refresh(); }, 15000);
+    setInterval(function () {
+      refresh(function (e) {
+        var off = !!e;
+        if (off !== lastOffline) { lastOffline = off; if (typeof window.onFamilySync === 'function') window.onFamilySync(off); }
+      });
+    }, 15000);
     if (onReady) { if (ready) onReady(); else readyCbs.push(onReady); }
   }
 
