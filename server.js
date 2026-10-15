@@ -4,6 +4,7 @@
  *
  * 启动：
  *   FAMILY_KEYS="密钥1:Chen,密钥2:Liza" PORT=8443 TLS_CERT=/path/cert.pem TLS_KEY=/path/key.pem node server.js
+ *   密钥也可以放在 data/keys.txt（每行 "密钥:名字"），这样不用写进 systemd 单元。两处都没有时自动生成 owner 密钥。
  *   不设 TLS_CERT / TLS_KEY 时以 HTTP 运行（只建议在内网或前面有反向代理时使用）。
  *
  * 访问：第一次打开 https://你的IP:8443/?k=密钥 ，之后浏览器会记住，不用再输入。
@@ -23,17 +24,24 @@ const RECEIPT_DIR = path.join(DATA_DIR, 'receipts');
 const COLLECTIONS = ['accounts', 'balances', 'rates', 'tx', 'recurring', 'categories', 'members', 'reminders', 'snapshots', 'audit'];
 const MAX_BODY = 12 * 1024 * 1024;
 const PAGE = path.join(__dirname, 'public', 'index.html');
+const VENDOR_DIR = path.join(__dirname, 'public', 'vendor');
 
 fs.mkdirSync(RECEIPT_DIR, { recursive: true });
 
 // ---------- access keys: one key per person, so the audit log shows who changed what ----------
+// Keys come from FAMILY_KEYS ("key:Name,key2:Name2") and/or DATA_DIR/keys.txt (one "key:Name" per line,
+// '#' starts a comment). keys.txt keeps secrets out of the systemd unit and out of git.
+const KEYS_FILE = path.join(DATA_DIR, 'keys.txt');
+function addPairs(map, text, sep) {
+  String(text || '').split(sep).map(s => s.trim()).filter(s => s && s[0] !== '#').forEach(pair => {
+    const i = pair.indexOf(':');
+    if (i > 0 && pair.slice(0, i).trim().length >= 6) map[pair.slice(0, i).trim()] = pair.slice(i + 1).trim();
+  });
+}
 function loadKeys() {
   const map = {};
-  const raw = process.env.FAMILY_KEYS || '';
-  raw.split(',').map(s => s.trim()).filter(Boolean).forEach(pair => {
-    const i = pair.indexOf(':');
-    if (i > 0) map[pair.slice(0, i)] = pair.slice(i + 1);
-  });
+  addPairs(map, process.env.FAMILY_KEYS, ',');
+  try { addPairs(map, fs.readFileSync(KEYS_FILE, 'utf8'), '\n'); } catch (e) { /* no keys file */ }
   if (!Object.keys(map).length) {
     // first run without FAMILY_KEYS: create a key for the owner and remember it on disk
     const keyFile = path.join(DATA_DIR, 'owner-key.txt');
@@ -176,6 +184,14 @@ async function handle(req, res) {
     const html = fs.readFileSync(PAGE, 'utf8');
     return send(res, 200, html, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
   }
+
+  if (req.method === 'GET' && url.pathname.startsWith('/vendor/')) {
+    const name = path.basename(url.pathname);
+    const file = path.join(VENDOR_DIR, name);
+    if (!/^[\w.-]+\.js$/.test(name) || !fs.existsSync(file)) return send(res, 404, 'Not found', { 'Content-Type': 'text/plain; charset=utf-8' });
+    return send(res, 200, fs.readFileSync(file), { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=604800' });
+  }
+  if (req.method === 'GET' && url.pathname === '/favicon.ico') return send(res, 204, '');
 
   if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
     if (!key) return send(res, 403, JSON.stringify({ ok: false, error: '未授权' }), { 'Content-Type': 'application/json' });

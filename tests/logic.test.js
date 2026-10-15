@@ -228,4 +228,59 @@ t('month helpers across year boundary', () => {
   assert.strictEqual(L.dateInMonth('2026-02', 31), '2026-02-28');
 });
 
+// 8. PDF statements
+t('PDF: text items grouped into lines by y, ordered by x, pages top to bottom', () => {
+  const items = [
+    { str: '7,000.00', x: 400, y: 700.2, w: 40 }, { str: '01/10/2026', x: 20, y: 699.9, w: 50 }, { str: 'BALANCE B/F', x: 120, y: 700, w: 60 },
+    { str: '03/10/2026', x: 20, y: 680, w: 50 }, { str: 'TRANSFER', x: 120, y: 680, w: 45 }, { str: ' FROM HLB', x: 165, y: 680, w: 45 }, { str: '3,000.00', x: 300, y: 680, w: 40 }, { str: '10,000.00', x: 400, y: 680, w: 45 }
+  ];
+  const lines = L.linesFromItems(items);
+  assert.deepStrictEqual(lines, ['01/10/2026 BALANCE B/F 7,000.00', '03/10/2026 TRANSFER FROM HLB 3,000.00 10,000.00']);
+});
+t('PDF: direction confirmed from the running balance; opening balance line skipped; continuation lines appended', () => {
+  const r = L.parseStatement([
+    'Statement Date: 31/10/2026', 'Date Description Debit Credit Balance',
+    '01/10/2026 BALANCE B/F 7,000.00',
+    '03/10/2026 TRANSFER FROM HLB LIZA 3,000.00 10,000.00',
+    '05/10/2026 GRAB*TRIP 15.00 9,985.00', 'REF 123456',
+    '06/10/2026 SALARY CREDIT 8,000.00 17,985.00',
+    '31/10/2026 BALANCE C/F 17,985.00', 'Page 1 of 1'
+  ]);
+  assert.strictEqual(r.ok.length, 3);
+  assert.deepStrictEqual(r.ok.map(x => x.signed), [3000, -15, 8000]);
+  assert.ok(r.ok.every(x => x.sure));
+  assert.strictEqual(r.ok[1].desc, 'GRAB*TRIP REF 123456');
+  assert.strictEqual(r.ok[1].importKey, L.importKey('2026-10-05', -15, 'GRAB*TRIP REF 123456'));
+  assert.strictEqual(r.bad.length, 0);
+});
+t('PDF: DR/CR and trailing-minus markers, month names, 2-digit years, double dates', () => {
+  const r = L.parseStatement([
+    '01 OCT 2026 SHOPEE 120.50',
+    '02 OCT 2026 PAYMENT - THANK YOU 500.00 CR',
+    '05-10-26 ATM WITHDRAWAL 200.00- 9,800.00',
+    '07/10/2026 08/10/2026 TNG EWALLET 50.00 DR 9,750.00',
+    '09/10/2026 INTEREST 1.23 CR 9,751.23'
+  ]);
+  assert.deepStrictEqual(r.ok.map(x => x.date), ['2026-10-01', '2026-10-02', '2026-10-05', '2026-10-07', '2026-10-09']);
+  assert.deepStrictEqual(r.ok.map(x => x.type), ['expense', 'income', 'expense', 'expense', 'income']);
+  assert.strictEqual(r.ok[0].sure, false, 'single amount, no marker: direction is a guess');
+  assert.strictEqual(r.ok[1].sure, true);
+  assert.strictEqual(r.ok[3].desc, 'TNG EWALLET');
+  const flipped = L.flipRow(r.ok[0]);
+  assert.strictEqual(flipped.type, 'income');
+  assert.strictEqual(flipped.importKey, L.importKey('2026-10-01', 120.5, 'SHOPEE'));
+});
+t('PDF: year taken from the statement header when lines have none', () => {
+  const lines = ['Penyata Akaun 01/09/2025 - 30/09/2025', '03 SEP GIANT 88.00 912.00'];
+  assert.strictEqual(L.guessYear(lines), 2025);
+  assert.strictEqual(L.parseStatement(lines).ok[0].date, '2025-09-03');
+  assert.strictEqual(L.parseStatement(lines, { year: 2024 }).ok[0].date, '2024-09-03');
+});
+t('PDF: duplicates against existing transactions are skipped via importKey', () => {
+  const r = L.parseStatement(['05/10/2026 GRAB*TRIP 15.00 DR 9,985.00']);
+  const d = L.dedupe(r.ok, [L.importKey('2026-10-05', -15, 'GRAB*TRIP')]);
+  assert.strictEqual(d.fresh.length, 0);
+  assert.strictEqual(d.dup.length, 1);
+});
+
 console.log('\n' + passed + ' tests passed');

@@ -1,3 +1,8 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>家庭资产记录</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
@@ -119,6 +124,14 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .prev div{display:grid;grid-template-columns:90px minmax(0,1fr) 100px;gap:8px;padding:6px 8px;border-top:1px solid var(--line)}
 .prev div:first-child{border-top:0;color:var(--muted)}
 .prev .dup{opacity:.5}
+.prev button.pr{display:grid;grid-template-columns:90px minmax(0,1fr) 100px;gap:8px;padding:6px 8px;border:0;border-top:1px solid var(--line);background:none;color:var(--ink);font:inherit;text-align:left;width:100%;cursor:pointer}
+.prev button.pr.dup{opacity:.5}
+.tag.warn{color:var(--warn);border-color:var(--warn)}
+.racts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px}
+.racts label.btn{display:inline-block}
+.thumb{max-height:140px;max-width:100%;border-radius:8px;margin-top:6px;border:1px solid var(--line);display:block}
+.thumb[hidden]{display:none}
+.rimg{max-width:100%;max-height:75vh;display:block;margin:0 auto;border-radius:8px}
 </style>
 
 <main class="wrap">
@@ -200,6 +213,17 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
         <label class="row-h" id="rowRepay" hidden>其中利息（RM）<input id="fInt" type="number" step="0.01" inputmode="decimal" placeholder="0.00"></label>
         <label>录入人 / 归属<select id="fMember"></select></label>
         <label class="full">备注<input id="fNote" type="text" maxlength="120" placeholder="例如：Giant 买菜"></label>
+        <div class="full">
+          <span class="muted">收据照片（可选）</span>
+          <div class="racts">
+            <label class="btn small">拍照<input id="fReceiptCam" type="file" accept="image/*" capture="environment" hidden></label>
+            <label class="btn small">选择图片<input id="fReceiptPick" type="file" accept="image/*" hidden></label>
+            <button class="btn small" id="fReceiptView" type="button" hidden>查看</button>
+            <button class="btn small danger" id="fReceiptClear" type="button" hidden>移除</button>
+            <span class="muted" id="fReceiptInfo"></span>
+          </div>
+          <img class="thumb" id="fReceiptThumb" alt="收据缩略图" hidden>
+        </div>
       </div>
       <div class="muted" id="entryHint" style="margin-top:8px"></div>
       <div class="acts">
@@ -248,17 +272,26 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 
   <!-- ===== 导入与设置 ===== -->
   <section class="view" id="v-settings" hidden>
+    <div class="panel" id="seedPanel" hidden>
+      <h2>初始数据</h2>
+      <p class="muted">还没有任何账户。可以一键导入 2026-10 工作簿里的 25 个账户、期初余额、汇率、成员（Chen、Liza、Uning）和常用分类，之后再按需修改。</p>
+      <div class="acts" style="justify-content:flex-start"><button class="btn primary" data-act="seed" id="seedBtn">导入期初数据（2026-10）</button></div>
+    </div>
+
     <div class="panel">
-      <h2>银行 CSV 导入</h2>
-      <p class="muted">支持 date、description、amount（负数为支出），或 debit、credit 两列。日期按日/月/年（DD/MM/YYYY）识别。重复导入的同一笔会自动跳过。</p>
+      <h2>银行账单导入（CSV / PDF）</h2>
+      <p class="muted">CSV：支持 date、description、amount（负数为支出），或 debit、credit 两列。PDF：选择银行电子对账单，自动识别带日期的交易行，用余额变动判断收支方向；无法判断的行标为“待确认”，点一下该行可切换收入/支出。日期按日/月/年识别，重复导入的同一笔会自动跳过。</p>
       <div class="form">
-        <label class="full">选择 CSV 文件<input id="csvFile" type="file" accept=".csv,text/csv"></label>
-        <label>日期列<select id="mDate"></select></label>
-        <label>描述列<select id="mDesc"></select></label>
-        <label>格式<select id="mMode"><option value="amount">单列金额（负数=支出）</option><option value="split">借贷两列</option></select></label>
-        <label>金额列<select id="mAmt"></select></label>
-        <label>借方（支出）列<select id="mDebit"></select></label>
-        <label>贷方（收入）列<select id="mCredit"></select></label>
+        <label class="full">选择文件（.csv 或 .pdf）<input id="csvFile" type="file" accept=".csv,text/csv,.pdf,application/pdf"></label>
+        <div class="full" id="csvMap" hidden><div class="form">
+          <label>日期列<select id="mDate"></select></label>
+          <label>描述列<select id="mDesc"></select></label>
+          <label>格式<select id="mMode"><option value="amount">单列金额（负数=支出）</option><option value="split">借贷两列</option></select></label>
+          <label>金额列<select id="mAmt"></select></label>
+          <label>借方（支出）列<select id="mDebit"></select></label>
+          <label>贷方（收入）列<select id="mCredit"></select></label>
+        </div></div>
+        <label id="pdfOpts" hidden>对账单年份（行内没有年份时使用）<input id="pdfYear" type="number" min="2000" max="2100" inputmode="numeric"></label>
         <label>导入到账户<select id="iAcc"></select></label>
         <label>录入人<select id="iMember"></select></label>
         <label>支出默认分类<select id="iCatExp"></select></label>
@@ -384,6 +417,15 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       <label class="full">备注<input id="mNote" type="text" maxlength="120"></label>
     </div>
     <div class="acts"><button class="btn primary" id="mSave">保存</button></div>
+  </div>
+</div>
+
+<!-- Receipt viewer -->
+<div class="sheet" id="receiptSheet" hidden>
+  <div class="panelbox" role="dialog" aria-modal="true" aria-labelledby="rcTitle">
+    <div class="ph"><div><h2 id="rcTitle">收据</h2><div class="muted" id="rcMeta"></div></div><button class="btn small" data-close>关闭</button></div>
+    <div class="muted" id="rcHint">正在加载…</div>
+    <img class="rimg" id="rcImg" alt="收据" hidden>
   </div>
 </div>
 
@@ -721,6 +763,153 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     return '﻿' + lines.join('\r\n');
   }
 
+  // ---------- PDF bank statements ----------
+  // Text items from pdf.js ({str, x, y, w}) grouped into lines: same y (within tolerance), ordered by x.
+  // Pages are read top to bottom (PDF y grows upwards, so higher y comes first).
+  function linesFromItems(items, tol) {
+    tol = tol || 2.5;
+    var rows = [];
+    (items || []).forEach(function (it) {
+      var str = String(it.str || '');
+      if (!str.trim()) return;
+      var r = null;
+      for (var i = 0; i < rows.length; i++) { if (Math.abs(rows[i].y - it.y) <= tol) { r = rows[i]; break; } }
+      if (!r) { r = { y: it.y, items: [] }; rows.push(r); }
+      r.items.push({ str: str, x: Number(it.x) || 0, w: Number(it.w) || 0 });
+    });
+    rows.sort(function (a, b) { return b.y - a.y; });
+    return rows.map(function (r) {
+      r.items.sort(function (a, b) { return a.x - b.x; });
+      var out = '', end = null;
+      r.items.forEach(function (it) {
+        if (end !== null) {
+          var gap = it.x - end;
+          if (gap > 1 || /\s$/.test(out) || /^\s/.test(it.str)) out += ' ';
+        }
+        out += it.str;
+        end = it.w ? it.x + it.w : it.x + it.str.length * 4;
+      });
+      return out.replace(/\s+/g, ' ').trim();
+    }).filter(Boolean);
+  }
+  var MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12,
+    mac: 3, ogos: 8, ogo: 8, sep_: 9, okt: 10, dis: 12, jan_: 1 };
+  function fullYear(y, fallback) {
+    if (y == null || y === '') return fallback || null;
+    y = Number(y);
+    return y < 100 ? 2000 + y : y;
+  }
+  // Date at the start of a statement line. Returns { date, rest } or null.
+  function leadingDate(line, year) {
+    var m, s = String(line || '').trim();
+    if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})\b\s*(.*)$/))) { var d0 = fmtDate(+m[1], +m[2], +m[3]); return d0 ? { date: d0, rest: m[4] } : null; }
+    if ((m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2}|\d{4})\b\s*(.*)$/))) {
+      var d1 = fmtDate(fullYear(m[3]), +m[2], +m[1]); return d1 ? { date: d1, rest: m[4] } : null;
+    }
+    if ((m = s.match(/^(\d{1,2})[\s\-]+([A-Za-z]{3,4})[\s\-]*(\d{4}|\d{2})?\b\s*(.*)$/))) {
+      var mo = MONTHS[m[2].toLowerCase()];
+      var y = fullYear(m[3], year);
+      if (!mo || !y) return null;
+      var d2 = fmtDate(y, mo, +m[1]); return d2 ? { date: d2, rest: m[4] } : null;
+    }
+    return null;
+  }
+  var MONEY_RE = /^\(?-?(?:RM|MYR|SGD|S\$|\$)?\s?\d{1,3}(?:,\d{3})*\.\d{2}\)?[-+]?$|^\(?-?\d+\.\d{2}\)?[-+]?$/i;
+  var MARK_RE = /^(DR|CR|DB|D|C|-|\+)$/i;
+  // Trailing money columns of a line: [{value, sign}] left to right, plus the text before them.
+  function trailingMoney(rest) {
+    var toks = String(rest || '').trim().split(/\s+/);
+    var money = [], pendingMark = null;
+    while (toks.length) {
+      var t = toks[toks.length - 1];
+      if (MARK_RE.test(t) && money.length === 0 && pendingMark === null) { pendingMark = t.toUpperCase(); toks.pop(); continue; }
+      if (MARK_RE.test(t) && money.length > 0) { // marker between two money tokens belongs to the token before it
+        toks.pop(); money[0].mark = t.toUpperCase(); continue;
+      }
+      if (!MONEY_RE.test(t)) break;
+      toks.pop();
+      var neg = /^\(.*\)$/.test(t) || /^-/.test(t) || /-$/.test(t);
+      var pos = /\+$/.test(t);
+      var val = parseFloat(t.replace(/[^0-9.]/g, ''));
+      var item = { value: val, mark: pendingMark, neg: neg, pos: pos };
+      pendingMark = null;
+      money.unshift(item);
+    }
+    return { money: money, text: toks.join(' ').trim() };
+  }
+  function signFromMarks(item) {
+    if (!item) return 0;
+    if (item.neg) return -1;
+    if (item.pos) return 1;
+    if (item.mark === 'CR' || item.mark === 'C' || item.mark === '+') return 1;
+    if (item.mark === 'DR' || item.mark === 'DB' || item.mark === 'D' || item.mark === '-') return -1;
+    return 0;
+  }
+  var SKIP_RE = /^(date|tarikh|description|butiran|keterangan|page\s*\d|muka\s*surat|statement|penyata|account\s*(no|number)|no\.?\s*akaun|total|jumlah|opening|closing|balance|baki)\b/i;
+  var OPEN_RE = /\b(b\/f|brought\s*forward|opening\s*balance|beginning\s*balance|baki\s*(awal|bawa|b\/f)|balance\s*forward)\b/i;
+  var CLOSE_RE = /\b(c\/f|carried\s*forward|closing\s*balance|ending\s*balance|baki\s*(akhir|c\/f)|total)\b/i;
+  function guessYear(lines) {
+    for (var i = 0; i < (lines || []).length; i++) {
+      var m = String(lines[i]).match(/\b(20\d{2})\b/);
+      if (m) return Number(m[1]);
+    }
+    return Number(nowMonth().slice(0, 4));
+  }
+  /* Transactions from statement text lines. Each dated line with money columns becomes a row; the last column is
+   * taken as the running balance when there are two or more, and the sign is confirmed from the balance change.
+   * Rows whose sign could not be confirmed get sure=false (default: expense) so the user can flip them.
+   * Returns rows in the same shape as mapRows: {date, month, desc, type, amount, signed, importKey, sure, balance}. */
+  function parseStatement(lines, opts) {
+    opts = opts || {};
+    var year = opts.year || guessYear(lines);
+    var ok = [], bad = [], prevBal = null, last = null, cont = 0;
+    (lines || []).forEach(function (raw, idx) {
+      var line = String(raw || '').replace(/\s+/g, ' ').trim();
+      if (!line) return;
+      var ld = leadingDate(line, year);
+      if (!ld) {
+        if (last && cont < 2 && line.length <= 60 && !SKIP_RE.test(line) && trailingMoney(line).money.length === 0) {
+          last.desc = (last.desc + ' ' + line).trim(); cont++;
+          last.importKey = importKey(last.date, last.signed, last.desc);
+        } else if (/\d\.\d{2}\b/.test(line) && !SKIP_RE.test(line)) bad.push({ line: idx + 1, raw: raw });
+        return;
+      }
+      var rest = ld.rest;
+      var again = leadingDate(rest, year); // posting date next to transaction date
+      if (again) rest = again.rest;
+      var tm = trailingMoney(rest);
+      var text = tm.text;
+      if (!tm.money.length) { last = null; return; }
+      if (OPEN_RE.test(text)) { prevBal = tm.money[tm.money.length - 1].value; last = null; return; }
+      if (CLOSE_RE.test(text) || SKIP_RE.test(text)) { last = null; return; }
+      var amtItem, balance = null;
+      if (tm.money.length >= 2) { amtItem = tm.money[tm.money.length - 2]; balance = tm.money[tm.money.length - 1].value; }
+      else amtItem = tm.money[0];
+      var amount = amtItem.value;
+      if (!(amount > 0)) { bad.push({ line: idx + 1, raw: raw }); last = null; return; }
+      var sign = signFromMarks(amtItem), sure = sign !== 0;
+      if (!sure && balance != null && prevBal != null) {
+        if (Math.abs((balance - prevBal) - amount) < 0.011) { sign = 1; sure = true; }
+        else if (Math.abs((prevBal - balance) - amount) < 0.011) { sign = -1; sure = true; }
+      }
+      if (!sure && opts.hasDebitCredit === false) { /* nothing more to infer */ }
+      if (sign === 0) sign = opts.defaultType === 'income' ? 1 : -1;
+      if (balance != null) prevBal = balance;
+      var signed = sign * amount;
+      var desc = text || '（无描述）';
+      last = { date: ld.date, month: ld.date.slice(0, 7), desc: desc, type: signed < 0 ? 'expense' : 'income',
+        amount: amount, signed: signed, importKey: importKey(ld.date, signed, desc), sure: sure, balance: balance, line: idx + 1 };
+      cont = 0;
+      ok.push(last);
+    });
+    return { ok: ok, bad: bad, year: year };
+  }
+  // Flip one parsed row between expense and income (keeps importKey consistent).
+  function flipRow(r) {
+    var signed = -r.signed;
+    return Object.assign({}, r, { signed: signed, type: signed < 0 ? 'expense' : 'income', sure: true, importKey: importKey(r.date, signed, r.desc) });
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -736,7 +925,9 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     loanBalance: loanBalance,
     validateTx: validateTx,
     parseCSV: parseCSV, parseAmount: parseAmount, importKey: importKey, mapRows: mapRows,
-    dedupe: dedupe, toCSV: toCSV
+    dedupe: dedupe, toCSV: toCSV,
+    linesFromItems: linesFromItems, leadingDate: leadingDate, trailingMoney: trailingMoney, guessYear: guessYear,
+    parseStatement: parseStatement, flipRow: flipRow
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;
@@ -886,9 +1077,9 @@ var Api = (function () {
   }
 
   var db = { collection: function (name) { return Col(name, {}); } };
-  var me = '';
+  var me = '', mePromise = null;
   var user = {
-    id: function () { return Promise.resolve(me || null); },
+    id: function () { return (mePromise || Promise.resolve()).then(function () { return me || null; }); },
     profiles: function (ids) {
       var out = {};
       (ids || []).forEach(function (id) {
@@ -898,9 +1089,11 @@ var Api = (function () {
     }
   };
 
-  function start(onReady) {
-    google.script.run.withSuccessHandler(function (email) { me = email || ''; }).getMe();
-    refresh();
+  function start(onReady, onError) {
+    mePromise = new Promise(function (resolve) {
+      google.script.run.withSuccessHandler(function (email) { me = email || ''; resolve(); }).withFailureHandler(function () { resolve(); }).getMe();
+    });
+    refresh(function (e) { if (e && !ready && onError) onError(e); });
     setInterval(function () { refresh(); }, 15000);
     if (onReady) { if (ready) onReady(); else readyCbs.push(onReady); }
   }
@@ -920,8 +1113,67 @@ var Api = (function () {
     }
   };
 })();
+
+/* The page was written against window.claude.use('db' | 'user' | 'downloads'); map those onto Api. */
+window.claude = window.claude || {};
+if (!window.claude.use) {
+  window.claude.use = function (name) {
+    if (name === 'db') {
+      return new Promise(function (resolve, reject) {
+        Api.start(function () { resolve(Api.db); }, function (e) { reject(e instanceof Error ? e : new Error(String(e && e.message || e))); });
+      });
+    }
+    if (name === 'user') return Promise.resolve(Api.user);
+    if (name === 'downloads') {
+      return Promise.resolve({
+        save: function (o) {
+          var blob = new Blob([o.data], { type: 'text/csv;charset=utf-8' });
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob); a.download = o.filename || 'export.csv';
+          document.body.appendChild(a); a.click();
+          setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+          return Promise.resolve();
+        }
+      });
+    }
+    return Promise.reject(new Error('不支持：' + name));
+  };
+}
 </script>
 
+<script>
+/* Seed data taken from the 2026-10 workbook (年初导入：2026-10-01). Used by tests and by the one-time import. */
+var SEED_ACCOUNTS = [
+  { id: 'epf-chen', name: 'EPF Chen', kind: 'asset', group: 'family', category: '退休金', currency: 'MYR', sort: 1, amount: 55199.66 },
+  { id: 'epf-liza', name: 'EPF Liza', kind: 'asset', group: 'family', category: '退休金', currency: 'MYR', sort: 2, amount: 104766.45 },
+  { id: 'moomoo-uning', name: 'MooMoo Uning', kind: 'asset', group: 'family', category: '投资', currency: 'MYR', sort: 3, amount: 3382 },
+  { id: 'moomoo-sgd', name: 'MooMoo SGD', kind: 'asset', group: 'family', category: '投资', currency: 'SGD', sort: 4, amount: 23705.29 },
+  { id: 'gold-silver', name: 'Gold & Silver', kind: 'asset', group: 'family', category: '投资', currency: 'SGD', sort: 5, amount: 1815.55 },
+  { id: 'asnb', name: 'ASNB Chen+Liza', kind: 'asset', group: 'family', category: '投资', currency: 'MYR', sort: 6, amount: 4452.43 },
+  { id: 'mytheo', name: 'Mytheo', kind: 'asset', group: 'family', category: '投资', currency: 'MYR', sort: 7, amount: 0 },
+  { id: 'luno', name: 'Luno Chen', kind: 'asset', group: 'family', category: '投资', currency: 'MYR', sort: 8, amount: 270 },
+  { id: 'ocbc-sg', name: 'OCBC Singapore', kind: 'asset', group: 'family', category: '现金与定存', currency: 'SGD', sort: 9, amount: 11953.05 },
+  { id: 'pb-fd', name: 'Public Bank 定存', kind: 'asset', group: 'family', category: '现金与定存', currency: 'MYR', sort: 10, amount: 5468.72 },
+  { id: 'pb-joint', name: 'Public Bank Chen+Liza', kind: 'asset', group: 'family', category: '现金与定存', currency: 'MYR', sort: 11, amount: 7000 },
+  { id: 'hlb-liza', name: 'HLB Liza', kind: 'asset', group: 'family', category: '现金与定存', currency: 'MYR', sort: 12, amount: 16111.71 },
+  { id: 'ins-chen-lifelink', name: 'Chen A-LifeLink', kind: 'asset', group: 'family', category: '保险', currency: 'MYR', sort: 13, amount: 5846.14 },
+  { id: 'ins-chen-other', name: 'Chen另一保单（待核名）', kind: 'asset', group: 'family', category: '保险', currency: 'MYR', sort: 14, amount: 6845.03 },
+  { id: 'ins-liza', name: 'Liza保险（两项合计）', kind: 'asset', group: 'family', category: '保险', currency: 'MYR', sort: 15, amount: 12278.46 },
+  { id: 'ins-uning', name: 'Uning保险（未提供）', kind: 'asset', group: 'family', category: '保险', currency: 'MYR', sort: 16, amount: null },
+  { id: 'house-uni', name: 'Uni Garden 房产', kind: 'asset', group: 'family', category: '房产', currency: 'MYR', sort: 17, amount: 580000 },
+  { id: 'car-mazda', name: 'Mazda CX-5 2.0 2018', kind: 'asset', group: 'family', category: '车辆', currency: 'MYR', sort: 18, amount: 55000 },
+  { id: 'car-hilux', name: 'Toyota Hilux E 2025', kind: 'asset', group: 'family', category: '车辆', currency: 'MYR', sort: 19, amount: 95000 },
+  { id: 'loan-house', name: 'Uni Garden 房贷', kind: 'liability', group: 'family', category: '房贷', currency: 'MYR', sort: 20, amount: 58971 },
+  { id: 'loan-mazda', name: 'Mazda 贷款', kind: 'liability', group: 'family', category: '车贷', currency: 'MYR', sort: 21, amount: 46102.85 },
+  { id: 'loan-hilux', name: 'Hilux 贷款', kind: 'liability', group: 'family', category: '车贷', currency: 'MYR', sort: 22, amount: 97923 },
+  { id: 'loan-personal', name: 'Personal loan', kind: 'liability', group: 'family', category: '个人贷款', currency: 'MYR', sort: 23, amount: 30000 },
+  { id: 'biz-pbb', name: 'Agrijoy PBB', kind: 'asset', group: 'business', category: '企业现金', currency: 'MYR', sort: 24, amount: 44309.09 },
+  { id: 'biz-uob', name: 'Agrijoy UOB 透支', kind: 'liability', group: 'business', category: '企业透支', currency: 'MYR', sort: 25, amount: 1489.94 }
+];
+var SEED_RATE = 3.1953;
+var SEED_MONTH = '2026-10';
+
+</script>
 <script>
 (function () {
 'use strict';
@@ -943,7 +1195,8 @@ var S = {
   month: L.nowMonth(), tab: 'overview',
   entryType: 'expense', editTxId: null, editAccId: null, editRecId: null, editCatId: null, editRemId: null,
   ledger: { month: '', member: '', type: '', q: '' },
-  csv: null, csvCands: null, arm: null, names: {}, ready: false
+  csv: null, pdf: null, pdfRows: null, csvCands: null, arm: null, names: {}, ready: false,
+  receipt: { dataUrl: null, fileId: null, removed: false }
 };
 
 // ---------- helpers ----------
@@ -989,7 +1242,7 @@ function memberOpts(withShared) {
   if (withShared) items.push({ value: 'shared', label: '共同' });
   return items;
 }
-function catOpts(type) { return catList(type).map(function (c) { return { value: c.id, label: c.name }; }); }
+function catOpts(type) { return catList(type).map(function (c) { return { value: c.name, label: c.name }; }); }
 function loanOpts() {
   return accList().filter(function (a) { return a.kind === 'liability' && a.group === 'family'; })
     .map(function (a) { return { value: a.id, label: a.name }; });
@@ -1000,6 +1253,7 @@ function fillAll() {
   fillSelect($('fLoan'), loanOpts(), { keep: true });
   fillSelect($('fCat'), catOpts(S.entryType === 'income' ? 'income' : 'expense'), { keep: true });
   fillSelect($('fMember'), memberOpts(true), { keep: true });
+  if (!S.memberDefaulted && !S.editTxId && S.uid && S.members[S.uid]) { $('fMember').value = S.uid; S.memberDefaulted = true; }
   fillSelect($('rAcc'), accOpts(), { keep: true });
   fillSelect($('rCat'), catOpts(), { keep: true });
   fillSelect($('rLoan'), loanOpts(), { keep: true });
@@ -1128,6 +1382,9 @@ function resetEntry(keepEdit) {
   if (!keepEdit) { S.editTxId = null; }
   $('fAmt').value = ''; $('fNote').value = ''; $('fInt').value = '';
   $('fDate').value = L.todayKuching();
+  S.memberDefaulted = false;
+  if (!S.editTxId && S.uid && S.members[S.uid]) { $('fMember').value = S.uid; S.memberDefaulted = true; }
+  setReceipt(null, null);
   $('entryTitle').textContent = S.editTxId ? '修改流水' : '记一笔';
   $('fSave').textContent = S.editTxId ? '保存修改' : '保存';
   $('fCancel').hidden = !S.editTxId;
@@ -1162,9 +1419,17 @@ async function saveEntry() {
   var err = L.validateTx(tx);
   if (err) return toast(err);
   var now = new Date().toISOString();
+  var prevTx = S.editTxId ? (S.tx[S.editTxId] || {}) : {};
+  tx.receiptId = S.receipt.removed ? null : (S.receipt.fileId || prevTx.receiptId || null);
   try {
+    if (S.receipt.dataUrl) {
+      $('fSave').disabled = true; $('entryHint').textContent = '正在上传收据…';
+      var up = await window.Api.receiptUpload(S.receipt.dataUrl, 'receipt-' + tx.date + '.jpg');
+      tx.receiptId = up && up.fileId ? up.fileId : null;
+      $('entryHint').textContent = '';
+    }
     if (S.editTxId) {
-      var prev = S.tx[S.editTxId] || {};
+      var prev = prevTx;
       var body = Object.assign({}, prev, tx, { updatedAt: now, byId: S.uid });
       delete body.id;
       await S.db.collection('tx').doc(S.editTxId).set(body);
@@ -1181,7 +1446,66 @@ async function saveEntry() {
       resetEntry(false);
       toast('已记录');
     }
-  } catch (e) { toast(errText(e)); }
+  } catch (e) { toast(e && e.message && /收据|图片/.test(e.message) ? e.message : errText(e)); }
+  finally { $('fSave').disabled = false; }
+}
+// ---------- receipts ----------
+function setReceipt(dataUrl, fileId) {
+  S.receipt = { dataUrl: dataUrl || null, fileId: fileId || null, removed: false };
+  var has = !!(dataUrl || fileId);
+  $('fReceiptView').hidden = !fileId;
+  $('fReceiptClear').hidden = !has;
+  $('fReceiptInfo').textContent = dataUrl ? '已选择，保存时上传' : fileId ? '已有收据' : '';
+  $('fReceiptThumb').hidden = !dataUrl;
+  if (dataUrl) $('fReceiptThumb').src = dataUrl; else $('fReceiptThumb').removeAttribute('src');
+  $('fReceiptCam').value = ''; $('fReceiptPick').value = '';
+}
+function clearReceipt() {
+  var hadFile = !!S.receipt.fileId;
+  setReceipt(null, null);
+  S.receipt.removed = hadFile;
+  if (hadFile) $('fReceiptInfo').textContent = '保存后将移除收据';
+}
+// Shrink a photo to at most 1600 px on the long side as JPEG; falls back to the original file when the browser cannot decode it.
+function compressImage(file) {
+  return new Promise(function (resolve, reject) {
+    var url = URL.createObjectURL(file), img = new Image();
+    img.onload = function () {
+      try {
+        var max = 1600, w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, max / Math.max(w, h));
+        var c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        resolve(c.toDataURL('image/jpeg', 0.82));
+      } catch (e) { URL.revokeObjectURL(url); reject(new Error('无法处理图片')); }
+    };
+    img.onerror = function () {
+      URL.revokeObjectURL(url);
+      if (/^image\/(jpeg|png|webp|heic|heif)$/.test(file.type) && file.size <= 3.5e6) {
+        var r = new FileReader(); r.onload = function () { resolve(r.result); }; r.onerror = function () { reject(new Error('无法读取图片')); }; r.readAsDataURL(file);
+      } else reject(new Error('无法读取这张图片，请改用 JPG/PNG'));
+    };
+    img.src = url;
+  });
+}
+function pickReceipt(e) {
+  var f = e.target.files && e.target.files[0];
+  if (!f) return;
+  $('fReceiptInfo').textContent = '正在处理图片…';
+  compressImage(f).then(function (dataUrl) {
+    if (dataUrl.length > 5.3e6) return toast('图片太大，请换一张');
+    setReceipt(dataUrl, null);
+  }).catch(function (err) { toast(err.message || '无法读取图片'); setReceipt(null, S.receipt.fileId); });
+}
+function viewReceipt(fileId, meta) {
+  if (!fileId) return;
+  $('rcMeta').textContent = meta || '';
+  $('rcHint').hidden = false; $('rcHint').textContent = '正在加载…';
+  $('rcImg').hidden = true; $('rcImg').removeAttribute('src');
+  $('receiptSheet').hidden = false;
+  window.Api.receiptGet(fileId).then(function (dataUrl) {
+    $('rcImg').src = dataUrl; $('rcImg').hidden = false; $('rcHint').hidden = true;
+  }).catch(function (e) { $('rcHint').textContent = '无法加载收据：' + (e && e.message || ''); });
 }
 function editTx(id) {
   var t = S.tx[id]; if (!t) return;
@@ -1195,8 +1519,9 @@ function editTx(id) {
   if (t.category) $('fCat').value = t.category;
   if (t.loanId) $('fLoan').value = t.loanId;
   $('fInt').value = t.type === 'repayment' ? (t.interest || 0) : '';
-  $('fMember').value = t.member || 'shared';
+  $('fMember').value = t.member || 'shared'; S.memberDefaulted = true;
   $('fNote').value = t.note || '';
+  setReceipt(null, t.receiptId || null);
   $('entryTitle').textContent = '修改流水';
   $('fSave').textContent = '保存修改';
   $('fCancel').hidden = false;
@@ -1208,8 +1533,11 @@ function renderRecent() {
     var sign = t.type === 'income' ? '+' : t.type === 'expense' || t.type === 'repayment' ? '-' : '';
     var cls = t.type === 'income' ? 'pos' : (t.type === 'expense' || t.type === 'repayment') ? 'neg' : '';
     return '<li class="li"><span class="n"><b>' + esc(t.note || t.category || TYPE_LABEL[t.type]) + '</b><small>' + esc(t.date) + ' · ' + esc(TYPE_LABEL[t.type]) + ' · ' + esc(memberName(t.member)) + '</small></span>' +
-      '<span class="acts"><b class="num ' + cls + '">' + sign + num(t.amount) + '</b><button class="btn small" data-act="edit-tx" data-id="' + esc(t.id) + '">修改</button></span></li>';
+      '<span class="acts"><b class="num ' + cls + '">' + sign + num(t.amount) + '</b>' + receiptBtn(t) + '<button class="btn small" data-act="edit-tx" data-id="' + esc(t.id) + '">修改</button></span></li>';
   }).join('') || '<li class="empty">还没有流水</li>';
+}
+function receiptBtn(t) {
+  return t.receiptId ? '<button class="btn small" data-act="view-receipt" data-id="' + esc(t.id) + '">收据</button>' : '';
 }
 
 // ---------- ledger ----------
@@ -1244,7 +1572,7 @@ function renderLedger() {
         (t.type === 'repayment' ? ' · 本金 ' + num(t.principal) + ' / 利息 ' + num(t.interest) : '');
       var armed = S.arm === 'del-tx:' + t.id;
       return '<li class="li"><span class="n"><b>' + esc(title) + '</b><small>' + esc(sub) + '</small></span>' +
-        '<span class="acts"><b class="num ' + cls + '">' + sign + num(t.amount) + '</b>' +
+        '<span class="acts"><b class="num ' + cls + '">' + sign + num(t.amount) + '</b>' + receiptBtn(t) +
         '<button class="btn small" data-act="edit-tx" data-id="' + esc(t.id) + '">修改</button>' +
         '<button class="btn small danger' + (armed ? ' armed' : '') + '" data-act="del-tx" data-id="' + esc(t.id) + '">' + (armed ? '再点确认' : '删除') + '</button></span></li>';
     }).join('') + '</ul>';
@@ -1520,6 +1848,7 @@ async function lockSnapshot(btn) {
   } catch (e) { toast(errText(e)); }
 }
 function renderSettings() {
+  $('seedPanel').hidden = Object.keys(S.accounts).length > 0 || !window.SEED_ACCOUNTS;
   $('lockBtn').textContent = '锁定 ' + S.month + ' 快照';
   $('lockBtn').classList.toggle('armed', S.arm === 'lock');
   var snaps = arr(S.snapshots).sort(function (a, b) { return b.id.localeCompare(a.id); });
@@ -1537,6 +1866,121 @@ async function audit(action, ref, summary) {
   catch (e) { /* audit is best-effort */ }
 }
 
+// ---------- one-time seed (2026-10 workbook) ----------
+var SEED_CATEGORIES = [
+  ['饮食', 'expense'], ['日用', 'expense'], ['交通与油费', 'expense'], ['孩子', 'expense'], ['水电网', 'expense'], ['房屋', 'expense'],
+  ['车辆', 'expense'], ['保险', 'expense'], ['医疗', 'expense'], ['娱乐', 'expense'], ['人情', 'expense'], ['其他支出', 'expense'],
+  ['工资', 'income'], ['农场提款', 'income'], ['投资收益', 'income'], ['其他收入', 'income']
+];
+async function seedData(btn) {
+  if (Object.keys(S.accounts).length) return toast('已经有账户了，不再导入');
+  if (!window.SEED_ACCOUNTS) return toast('没有找到期初数据');
+  if (S.arm !== 'seed') { S.arm = 'seed'; btn.textContent = '再点确认导入'; btn.classList.add('armed'); setTimeout(function () { if (S.arm === 'seed') { S.arm = null; btn.textContent = '导入期初数据（2026-10）'; btn.classList.remove('armed'); } }, 4000); return; }
+  S.arm = null; btn.disabled = true; btn.textContent = '正在导入…';
+  var m = window.SEED_MONTH || '2026-10', now = new Date().toISOString();
+  try {
+    var jobs = [];
+    window.SEED_ACCOUNTS.forEach(function (a) {
+      jobs.push(S.db.collection('accounts').doc(a.id).set({ name: a.name, kind: a.kind, group: a.group, category: a.category, currency: a.currency, sort: a.sort, active: true }));
+      if (a.amount !== null) jobs.push(S.db.collection('balances').doc(m + '__' + a.id).set({ month: m, asOf: m + '-01', accountId: a.id, amount: a.amount, currency: a.currency, note: '期初导入', byId: S.uid, updatedAt: now }));
+    });
+    jobs.push(S.db.collection('rates').doc(m).set({ sgdMyr: window.SEED_RATE || L.DEFAULT_RATE, updatedAt: now }));
+    [['Chen', 1], ['Liza', 2], ['Uning', 3]].forEach(function (x) { jobs.push(S.db.collection('members').doc(x[0]).set({ name: x[0], sort: x[1] })); });
+    SEED_CATEGORIES.forEach(function (c, i) { jobs.push(S.db.collection('categories').doc('c-' + (i + 1)).set({ name: c[0], type: c[1], budget: 0, sort: i + 1 })); });
+    for (var i = 0; i < jobs.length; i += 8) await Promise.all(jobs.slice(i, i + 8));
+    audit('导入期初数据', m, window.SEED_ACCOUNTS.length + ' 个账户');
+    toast('期初数据已导入');
+    showTab('balances');
+  } catch (e) { toast(errText(e)); }
+  finally { btn.disabled = false; btn.textContent = '导入期初数据（2026-10）'; btn.classList.remove('armed'); }
+}
+
+// ---------- PDF statement import (pdf.js, served from /vendor on the same server) ----------
+function ensurePdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  return new Promise(function (resolve, reject) {
+    var sc = document.createElement('script');
+    sc.src = 'vendor/pdf.min.js';
+    sc.onload = function () {
+      if (!window.pdfjsLib) return reject(new Error('PDF 组件加载失败'));
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+      resolve(window.pdfjsLib);
+    };
+    sc.onerror = function () { reject(new Error('无法加载 PDF 组件（vendor/pdf.min.js）')); };
+    document.head.appendChild(sc);
+  });
+}
+async function readPdfLines(file) {
+  var lib = await ensurePdfJs();
+  var buf = await file.arrayBuffer();
+  var doc, password;
+  for (var attempt = 0; attempt < 3; attempt++) {
+    try {
+      doc = await lib.getDocument({ data: buf.slice(0), password: password }).promise;
+      break;
+    } catch (e) {
+      if (e && e.name === 'PasswordException') {
+        password = prompt(attempt === 0 ? '这份 PDF 有密码，请输入（银行对账单通常是身份证号或出生日期）：' : '密码不正确，请重试：');
+        if (password == null) throw new Error('已取消');
+        continue;
+      }
+      throw new Error('无法读取 PDF：' + (e && e.message || ''));
+    }
+  }
+  if (!doc) throw new Error('密码不正确');
+  var lines = [];
+  for (var p = 1; p <= doc.numPages; p++) {
+    var page = await doc.getPage(p);
+    var tc = await page.getTextContent();
+    var items = tc.items.map(function (it) { return { str: it.str, x: it.transform[4], y: it.transform[5], w: it.width }; });
+    lines = lines.concat(L.linesFromItems(items));
+  }
+  return { lines: lines, pages: doc.numPages };
+}
+function pickImportFile(e) {
+  var f = e.target.files && e.target.files[0];
+  if (!f) return;
+  S.csv = null; S.pdf = null; S.pdfRows = null; S.csvCands = null;
+  $('importBtn').disabled = true; $('prev').hidden = true;
+  var isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+  $('csvMap').hidden = isPdf; $('pdfOpts').hidden = !isPdf;
+  if (!isPdf) {
+    var reader = new FileReader();
+    reader.onload = function () { S.csv = L.parseCSV(reader.result); fillCsvMapping(); };
+    reader.readAsText(f);
+    return;
+  }
+  $('importSum').textContent = '正在读取 PDF…';
+  readPdfLines(f).then(function (r) {
+    S.pdf = r;
+    $('pdfYear').value = L.guessYear(r.lines);
+    if (!r.lines.length) { $('importSum').textContent = '这份 PDF 没有可识别的文字（可能是扫描图片），无法导入。'; return; }
+    $('importSum').textContent = r.pages + ' 页，' + r.lines.length + ' 行文字已读取。请选择导入账户后点击“预览”。';
+  }).catch(function (err) { $('importSum').textContent = (err && err.message) || '无法读取 PDF'; });
+}
+function previewPdf() {
+  if (!S.pdf) return toast('请先选择 PDF 文件');
+  if (!S.pdfRows) {
+    var res = L.parseStatement(S.pdf.lines, { year: Number($('pdfYear').value) || undefined });
+    S.pdfRows = res.ok; S.pdfBad = res.bad.length;
+  }
+  var existing = Object.keys(S.tx).map(function (k) { return S.tx[k].importKey; }).filter(Boolean);
+  var d = L.dedupe(S.pdfRows, existing);
+  S.csvCands = d.fresh;
+  var unsure = S.pdfRows.filter(function (r) { return !r.sure; }).length;
+  $('importSum').textContent = '识别 ' + S.pdfRows.length + ' 笔 · 可导入 ' + d.fresh.length + ' 笔 · 已导入过（跳过）' + d.dup.length + ' 笔' +
+    (unsure ? ' · 待确认方向 ' + unsure + ' 笔（点该行切换）' : '') + (S.pdfBad ? ' · 未识别 ' + S.pdfBad + ' 行' : '');
+  $('importBtn').disabled = d.fresh.length === 0 || !$('iAcc').value;
+  var rows = S.pdfRows.slice(0, 300).map(function (c, i) {
+    var isDup = d.dup.indexOf(c) >= 0;
+    return '<button type="button" class="pr' + (isDup ? ' dup' : '') + '" data-row="' + i + '"><span>' + esc(c.date) + '</span><span>' + esc(c.desc) +
+      (isDup ? ' <span class="tag">已导入</span>' : '') + (!c.sure ? ' <span class="tag warn">待确认</span>' : '') + '</span>' +
+      '<span class="num ' + (c.type === 'income' ? 'pos' : 'neg') + '" style="text-align:right">' + (c.type === 'income' ? '+' : '-') + num(c.amount) + '</span></button>';
+  }).join('');
+  $('prev').innerHTML = '<div><span>日期</span><span>描述（点一行切换收/支）</span><span style="text-align:right">金额</span></div>' + rows;
+  $('prev').hidden = false;
+}
+
 // ---------- CSV import ----------
 function guessCol(headers, re) {
   for (var i = 0; i < headers.length; i++) if (re.test(headers[i])) return headers[i];
@@ -1552,6 +1996,7 @@ function fillCsvMapping() {
   $('mDebit').value = guessCol(h, /debit|withdraw|借|支出/i);
   $('mCredit').value = guessCol(h, /credit|deposit|贷|收入/i);
   $('mMode').value = $('mAmt').value ? 'amount' : 'split';
+  $('csvMap').hidden = false;
   S.csvCands = null;
   $('importBtn').disabled = true;
   $('importSum').textContent = S.csv.rows.length + ' 行已读取，请确认列对应关系后点击“预览”。';
@@ -1562,7 +2007,8 @@ function mappingNow() {
     : { date: $('mDate').value, desc: $('mDesc').value, debit: $('mDebit').value, credit: $('mCredit').value };
 }
 function previewCsv() {
-  if (!S.csv) return toast('请先选择 CSV 文件');
+  if (S.pdf) return previewPdf();
+  if (!S.csv) return toast('请先选择 CSV 或 PDF 文件');
   var map = mappingNow();
   if (!map.date || !map.desc || (!map.amount && !(map.debit || map.credit))) return toast('请选择日期、描述和金额列');
   var res = L.mapRows(S.csv, map);
@@ -1587,7 +2033,7 @@ async function runImport() {
     return {
       date: c.date, month: c.month, type: c.type, amount: c.amount, account: acc, toAccount: null,
       category: c.type === 'income' ? catI : catE, loanId: null, principal: 0, interest: 0,
-      member: member, note: c.desc, importKey: c.importKey, source: 'csv',
+      member: member, note: c.desc, importKey: c.importKey, source: S.pdf ? 'pdf' : 'csv',
       byId: S.uid, createdAt: new Date().toISOString()
     };
   });
@@ -1600,7 +2046,7 @@ async function runImport() {
       done += chunk.length;
       $('importSum').textContent = '正在导入… ' + done + ' / ' + bodies.length;
     }
-    audit('CSV 导入', accName(acc), '导入 ' + bodies.length + ' 笔');
+    audit(S.pdf ? 'PDF 导入' : 'CSV 导入', accName(acc), '导入 ' + bodies.length + ' 笔');
     $('importSum').textContent = '已导入 ' + bodies.length + ' 笔。';
     $('prev').hidden = true;
     S.csvCands = null;
@@ -1683,6 +2129,14 @@ document.addEventListener('click', function (e) {
   if (a === 'open-rem') return openRem(id);
   if (a === 'done-rem') return S.db.collection('reminders').doc(id).update({ done: true }).then(function () { audit('完成提醒', id, ''); toast('已完成'); }).catch(function (x) { toast(errText(x)); });
   if (a === 'lock-snap') return lockSnapshot(act);
+  if (a === 'seed') return seedData(act);
+  if (a === 'view-receipt') { var vt = S.tx[id]; return vt && viewReceipt(vt.receiptId, vt.date + ' · ' + summaryOf(vt)); }
+});
+document.addEventListener('click', function (e) {
+  var pr = e.target.closest('#prev button[data-row]');
+  if (!pr || !S.pdfRows) return;
+  var i = Number(pr.dataset.row);
+  if (S.pdfRows[i]) { S.pdfRows[i] = L.flipRow(S.pdfRows[i]); previewPdf(); }
 });
 // two-step confirm for destructive actions: first tap arms, second tap within 4s runs
 function armOrRun(key, fn) {
@@ -1725,13 +2179,12 @@ $('rate').addEventListener('change', function (e) {
     .then(function () { audit('修改汇率', S.month, 'SGD→RM ' + v); toast('汇率已保存'); })
     .catch(function (x) { toast(errText(x)); });
 });
-$('csvFile').addEventListener('change', function (e) {
-  var f = e.target.files && e.target.files[0];
-  if (!f) return;
-  var reader = new FileReader();
-  reader.onload = function () { S.csv = L.parseCSV(reader.result); fillCsvMapping(); };
-  reader.readAsText(f);
-});
+$('csvFile').addEventListener('change', pickImportFile);
+$('pdfYear').addEventListener('change', function () { S.pdfRows = null; S.csvCands = null; $('importBtn').disabled = true; });
+$('fReceiptCam').addEventListener('change', pickReceipt);
+$('fReceiptPick').addEventListener('change', pickReceipt);
+$('fReceiptClear').addEventListener('click', clearReceipt);
+$('fReceiptView').addEventListener('click', function () { viewReceipt(S.receipt.fileId, ''); });
 $('previewBtn').addEventListener('click', previewCsv);
 $('importBtn').addEventListener('click', runImport);
 $('mMode').addEventListener('change', function () { S.csvCands = null; $('importBtn').disabled = true; });
@@ -1739,11 +2192,17 @@ $('iAcc').addEventListener('change', function () { if (S.csvCands && S.csvCands.
 
 // ---------- start ----------
 async function init() {
-  var db = null, user = null, dl = null;
-  try { db = await window.claude.use('db'); } catch (e) {}
+  var db = null, user = null, dl = null, dbErr = null;
+  $('notice').hidden = false; $('notice').textContent = '正在读取数据…';
+  try { db = await window.claude.use('db'); } catch (e) { dbErr = e; }
   try { user = await window.claude.use('user'); } catch (e) {}
   try { dl = await window.claude.use('downloads'); } catch (e) {}
-  if (!db) { $('notice').hidden = false; $('notice').textContent = '需要用 Claude 账号登录后才能查看和记录。'; return; }
+  if (!db) {
+    $('notice').innerHTML = '<b>无法读取数据</b><br>' + esc(dbErr && dbErr.message ? dbErr.message : '请用带密钥的链接重新打开页面。') +
+      '<br><button class="btn" type="button" style="margin-top:10px" onclick="location.reload()">重试</button>';
+    return;
+  }
+  $('notice').hidden = true;
   S.db = db; S.user = user; S.downloads = dl;
   try { S.uid = user ? await user.id() : null; } catch (e) {}
 

@@ -329,6 +329,153 @@
     return '﻿' + lines.join('\r\n');
   }
 
+  // ---------- PDF bank statements ----------
+  // Text items from pdf.js ({str, x, y, w}) grouped into lines: same y (within tolerance), ordered by x.
+  // Pages are read top to bottom (PDF y grows upwards, so higher y comes first).
+  function linesFromItems(items, tol) {
+    tol = tol || 2.5;
+    var rows = [];
+    (items || []).forEach(function (it) {
+      var str = String(it.str || '');
+      if (!str.trim()) return;
+      var r = null;
+      for (var i = 0; i < rows.length; i++) { if (Math.abs(rows[i].y - it.y) <= tol) { r = rows[i]; break; } }
+      if (!r) { r = { y: it.y, items: [] }; rows.push(r); }
+      r.items.push({ str: str, x: Number(it.x) || 0, w: Number(it.w) || 0 });
+    });
+    rows.sort(function (a, b) { return b.y - a.y; });
+    return rows.map(function (r) {
+      r.items.sort(function (a, b) { return a.x - b.x; });
+      var out = '', end = null;
+      r.items.forEach(function (it) {
+        if (end !== null) {
+          var gap = it.x - end;
+          if (gap > 1 || /\s$/.test(out) || /^\s/.test(it.str)) out += ' ';
+        }
+        out += it.str;
+        end = it.w ? it.x + it.w : it.x + it.str.length * 4;
+      });
+      return out.replace(/\s+/g, ' ').trim();
+    }).filter(Boolean);
+  }
+  var MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12,
+    mac: 3, ogos: 8, ogo: 8, sep_: 9, okt: 10, dis: 12, jan_: 1 };
+  function fullYear(y, fallback) {
+    if (y == null || y === '') return fallback || null;
+    y = Number(y);
+    return y < 100 ? 2000 + y : y;
+  }
+  // Date at the start of a statement line. Returns { date, rest } or null.
+  function leadingDate(line, year) {
+    var m, s = String(line || '').trim();
+    if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})\b\s*(.*)$/))) { var d0 = fmtDate(+m[1], +m[2], +m[3]); return d0 ? { date: d0, rest: m[4] } : null; }
+    if ((m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2}|\d{4})\b\s*(.*)$/))) {
+      var d1 = fmtDate(fullYear(m[3]), +m[2], +m[1]); return d1 ? { date: d1, rest: m[4] } : null;
+    }
+    if ((m = s.match(/^(\d{1,2})[\s\-]+([A-Za-z]{3,4})[\s\-]*(\d{4}|\d{2})?\b\s*(.*)$/))) {
+      var mo = MONTHS[m[2].toLowerCase()];
+      var y = fullYear(m[3], year);
+      if (!mo || !y) return null;
+      var d2 = fmtDate(y, mo, +m[1]); return d2 ? { date: d2, rest: m[4] } : null;
+    }
+    return null;
+  }
+  var MONEY_RE = /^\(?-?(?:RM|MYR|SGD|S\$|\$)?\s?\d{1,3}(?:,\d{3})*\.\d{2}\)?[-+]?$|^\(?-?\d+\.\d{2}\)?[-+]?$/i;
+  var MARK_RE = /^(DR|CR|DB|D|C|-|\+)$/i;
+  // Trailing money columns of a line: [{value, sign}] left to right, plus the text before them.
+  function trailingMoney(rest) {
+    var toks = String(rest || '').trim().split(/\s+/);
+    var money = [], pendingMark = null;
+    while (toks.length) {
+      var t = toks[toks.length - 1];
+      if (MARK_RE.test(t) && money.length === 0 && pendingMark === null) { pendingMark = t.toUpperCase(); toks.pop(); continue; }
+      if (MARK_RE.test(t) && money.length > 0) { // marker between two money tokens belongs to the token before it
+        toks.pop(); money[0].mark = t.toUpperCase(); continue;
+      }
+      if (!MONEY_RE.test(t)) break;
+      toks.pop();
+      var neg = /^\(.*\)$/.test(t) || /^-/.test(t) || /-$/.test(t);
+      var pos = /\+$/.test(t);
+      var val = parseFloat(t.replace(/[^0-9.]/g, ''));
+      var item = { value: val, mark: pendingMark, neg: neg, pos: pos };
+      pendingMark = null;
+      money.unshift(item);
+    }
+    return { money: money, text: toks.join(' ').trim() };
+  }
+  function signFromMarks(item) {
+    if (!item) return 0;
+    if (item.neg) return -1;
+    if (item.pos) return 1;
+    if (item.mark === 'CR' || item.mark === 'C' || item.mark === '+') return 1;
+    if (item.mark === 'DR' || item.mark === 'DB' || item.mark === 'D' || item.mark === '-') return -1;
+    return 0;
+  }
+  var SKIP_RE = /^(date|tarikh|description|butiran|keterangan|page\s*\d|muka\s*surat|statement|penyata|account\s*(no|number)|no\.?\s*akaun|total|jumlah|opening|closing|balance|baki)\b/i;
+  var OPEN_RE = /\b(b\/f|brought\s*forward|opening\s*balance|beginning\s*balance|baki\s*(awal|bawa|b\/f)|balance\s*forward)\b/i;
+  var CLOSE_RE = /\b(c\/f|carried\s*forward|closing\s*balance|ending\s*balance|baki\s*(akhir|c\/f)|total)\b/i;
+  function guessYear(lines) {
+    for (var i = 0; i < (lines || []).length; i++) {
+      var m = String(lines[i]).match(/\b(20\d{2})\b/);
+      if (m) return Number(m[1]);
+    }
+    return Number(nowMonth().slice(0, 4));
+  }
+  /* Transactions from statement text lines. Each dated line with money columns becomes a row; the last column is
+   * taken as the running balance when there are two or more, and the sign is confirmed from the balance change.
+   * Rows whose sign could not be confirmed get sure=false (default: expense) so the user can flip them.
+   * Returns rows in the same shape as mapRows: {date, month, desc, type, amount, signed, importKey, sure, balance}. */
+  function parseStatement(lines, opts) {
+    opts = opts || {};
+    var year = opts.year || guessYear(lines);
+    var ok = [], bad = [], prevBal = null, last = null, cont = 0;
+    (lines || []).forEach(function (raw, idx) {
+      var line = String(raw || '').replace(/\s+/g, ' ').trim();
+      if (!line) return;
+      var ld = leadingDate(line, year);
+      if (!ld) {
+        if (last && cont < 2 && line.length <= 60 && !SKIP_RE.test(line) && trailingMoney(line).money.length === 0) {
+          last.desc = (last.desc + ' ' + line).trim(); cont++;
+          last.importKey = importKey(last.date, last.signed, last.desc);
+        } else if (/\d\.\d{2}\b/.test(line) && !SKIP_RE.test(line)) bad.push({ line: idx + 1, raw: raw });
+        return;
+      }
+      var rest = ld.rest;
+      var again = leadingDate(rest, year); // posting date next to transaction date
+      if (again) rest = again.rest;
+      var tm = trailingMoney(rest);
+      var text = tm.text;
+      if (!tm.money.length) { last = null; return; }
+      if (OPEN_RE.test(text)) { prevBal = tm.money[tm.money.length - 1].value; last = null; return; }
+      if (CLOSE_RE.test(text) || SKIP_RE.test(text)) { last = null; return; }
+      var amtItem, balance = null;
+      if (tm.money.length >= 2) { amtItem = tm.money[tm.money.length - 2]; balance = tm.money[tm.money.length - 1].value; }
+      else amtItem = tm.money[0];
+      var amount = amtItem.value;
+      if (!(amount > 0)) { bad.push({ line: idx + 1, raw: raw }); last = null; return; }
+      var sign = signFromMarks(amtItem), sure = sign !== 0;
+      if (!sure && balance != null && prevBal != null) {
+        if (Math.abs((balance - prevBal) - amount) < 0.011) { sign = 1; sure = true; }
+        else if (Math.abs((prevBal - balance) - amount) < 0.011) { sign = -1; sure = true; }
+      }
+      if (!sure && opts.hasDebitCredit === false) { /* nothing more to infer */ }
+      if (sign === 0) sign = opts.defaultType === 'income' ? 1 : -1;
+      if (balance != null) prevBal = balance;
+      var signed = sign * amount;
+      var desc = text || '（无描述）';
+      last = { date: ld.date, month: ld.date.slice(0, 7), desc: desc, type: signed < 0 ? 'expense' : 'income',
+        amount: amount, signed: signed, importKey: importKey(ld.date, signed, desc), sure: sure, balance: balance, line: idx + 1 };
+      cont = 0;
+      ok.push(last);
+    });
+    return { ok: ok, bad: bad, year: year };
+  }
+  // Flip one parsed row between expense and income (keeps importKey consistent).
+  function flipRow(r) {
+    var signed = -r.signed;
+    return Object.assign({}, r, { signed: signed, type: signed < 0 ? 'expense' : 'income', sure: true, importKey: importKey(r.date, signed, r.desc) });
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -344,7 +491,9 @@
     loanBalance: loanBalance,
     validateTx: validateTx,
     parseCSV: parseCSV, parseAmount: parseAmount, importKey: importKey, mapRows: mapRows,
-    dedupe: dedupe, toCSV: toCSV
+    dedupe: dedupe, toCSV: toCSV,
+    linesFromItems: linesFromItems, leadingDate: leadingDate, trailingMoney: trailingMoney, guessYear: guessYear,
+    parseStatement: parseStatement, flipRow: flipRow
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;
