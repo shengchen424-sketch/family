@@ -367,6 +367,10 @@ t('goal progress from linked account and target month', () => {
   assert.strictEqual(p.monthsLeft, 6);
   assert.ok(Math.abs(p.perMonth - (30000 - 16111.71) / 6) < 1e-6);
   assert.strictEqual(L.goalProgress({ target: 100, saved: 150 }, {}, {}, {}, M).done, true);
+  const invAcc = { h: { id: 'h', name: 'House', kind: 'asset', group: 'family', category: '房产', currency: 'MYR' }, c: { id: 'c', name: 'Cash', kind: 'asset', group: 'family', category: '现金与定存', currency: 'MYR' }, l: { id: 'l', name: 'Loan', kind: 'liability', group: 'family', category: '房贷', currency: 'MYR' }, b: { id: 'b', name: 'Biz', kind: 'asset', group: 'business', category: '企业现金', currency: 'MYR' } };
+  const invBal = { a: { month: M, accountId: 'h', amount: 500000 }, b: { month: M, accountId: 'c', amount: 30000 }, c: { month: M, accountId: 'l', amount: 10000 }, d: { month: M, accountId: 'b', amount: 99999 } };
+  assert.strictEqual(L.investableNet(invAcc, invBal, {}, M), 20000);
+  assert.strictEqual(L.goalProgress({ kind: 'investable', target: 40000 }, invAcc, invBal, {}, M).pct, 0.5);
 });
 t('insights: spend change and category jump', () => {
   const txs = [

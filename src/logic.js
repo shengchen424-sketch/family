@@ -117,6 +117,14 @@
     return t;
   }
   function familyTotals(accounts, balances, rates, m) { return groupTotals(accounts, balances, rates, m, 'family'); }
+  // Investable net worth: family assets minus liabilities, excluding the home and vehicles (they produce no income).
+  var NON_PRODUCTIVE = ['房产', '车辆'];
+  function investableNet(accounts, balances, rates, m) {
+    return accountValues(accounts, balances, rates, m).reduce(function (s, r) {
+      if (r.acc.group !== 'family' || r.status === 'missing' || NON_PRODUCTIVE.indexOf(r.acc.category || '') >= 0) return s;
+      return s + (r.acc.kind === 'asset' ? r.rm : -r.rm);
+    }, 0);
+  }
   function businessTotals(accounts, balances, rates, m) { return groupTotals(accounts, balances, rates, m, 'business'); }
 
   // Net worth for each month in `months` where at least one balance exists on or before it.
@@ -614,6 +622,7 @@
   function goalProgress(goal, accounts, balances, rates, m) {
     var current = Number(goal.saved) || 0;
     if (goal.kind === 'networth') current = familyTotals(accounts, balances, rates, m).net;
+    else if (goal.kind === 'investable') current = investableNet(accounts, balances, rates, m);
     else if (goal.accountId && accounts[goal.accountId]) {
       var r = accountValues({ a: accounts[goal.accountId] }, balances, rates, m)[0];
       if (r && r.rm != null) current = r.rm;
@@ -1040,7 +1049,7 @@
     daysInMonth: daysInMonth, dateInMonth: dateInMonth, isDate: isDate, parseDate: parseDate,
     rateFor: rateFor, latestBalance: latestBalance, valueAt: valueAt, toRM: toRM,
     activeAccounts: activeAccounts, accountValues: accountValues,
-    groupTotals: groupTotals, familyTotals: familyTotals, businessTotals: businessTotals,
+    groupTotals: groupTotals, familyTotals: familyTotals, investableNet: investableNet, businessTotals: businessTotals,
     netWorthTrend: netWorthTrend,
     cashflow: cashflow, cashflowSeries: cashflowSeries, avgMonthlyExpense: avgMonthlyExpense,
     emergencyMonths: emergencyMonths,

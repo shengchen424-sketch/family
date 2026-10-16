@@ -776,7 +776,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
   <div class="panelbox" role="dialog" aria-modal="true">
     <div class="ph"><h2 id="gTitle">储蓄目标</h2><button class="btn small" data-close>关闭</button></div>
     <div class="fields">
-      <label>类型<select id="gKind"><option value="saving">储蓄目标（某个账户或手动记录）</option><option value="networth">净资产目标（按家庭净资产算进度）</option></select></label>
+      <label>类型<select id="gKind"><option value="saving">储蓄目标（某个账户或手动记录）</option><option value="networth">净资产目标（按家庭净资产算进度）</option><option value="investable">可投资资产目标（净资产减去房产和车辆）</option></select></label>
       <label>名称<input id="gName" type="text" maxlength="40" placeholder="例如：紧急备用金、Uning 教育金、日本旅行"></label>
       <label>目标金额（RM）<input id="gTarget" type="number" step="0.01" inputmode="decimal"></label>
       <label>关联账户（用它的余额算进度，可空）<select id="gAcc"></select></label>
@@ -933,6 +933,14 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     return t;
   }
   function familyTotals(accounts, balances, rates, m) { return groupTotals(accounts, balances, rates, m, 'family'); }
+  // Investable net worth: family assets minus liabilities, excluding the home and vehicles (they produce no income).
+  var NON_PRODUCTIVE = ['房产', '车辆'];
+  function investableNet(accounts, balances, rates, m) {
+    return accountValues(accounts, balances, rates, m).reduce(function (s, r) {
+      if (r.acc.group !== 'family' || r.status === 'missing' || NON_PRODUCTIVE.indexOf(r.acc.category || '') >= 0) return s;
+      return s + (r.acc.kind === 'asset' ? r.rm : -r.rm);
+    }, 0);
+  }
   function businessTotals(accounts, balances, rates, m) { return groupTotals(accounts, balances, rates, m, 'business'); }
 
   // Net worth for each month in `months` where at least one balance exists on or before it.
@@ -1430,6 +1438,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
   function goalProgress(goal, accounts, balances, rates, m) {
     var current = Number(goal.saved) || 0;
     if (goal.kind === 'networth') current = familyTotals(accounts, balances, rates, m).net;
+    else if (goal.kind === 'investable') current = investableNet(accounts, balances, rates, m);
     else if (goal.accountId && accounts[goal.accountId]) {
       var r = accountValues({ a: accounts[goal.accountId] }, balances, rates, m)[0];
       if (r && r.rm != null) current = r.rm;
@@ -1856,7 +1865,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     daysInMonth: daysInMonth, dateInMonth: dateInMonth, isDate: isDate, parseDate: parseDate,
     rateFor: rateFor, latestBalance: latestBalance, valueAt: valueAt, toRM: toRM,
     activeAccounts: activeAccounts, accountValues: accountValues,
-    groupTotals: groupTotals, familyTotals: familyTotals, businessTotals: businessTotals,
+    groupTotals: groupTotals, familyTotals: familyTotals, investableNet: investableNet, businessTotals: businessTotals,
     netWorthTrend: netWorthTrend,
     cashflow: cashflow, cashflowSeries: cashflowSeries, avgMonthlyExpense: avgMonthlyExpense,
     emergencyMonths: emergencyMonths,
@@ -2568,7 +2577,7 @@ async function saveBatch() {
 // ---------- goals ----------
 function goalRow(g, m, withBtn) {
   var p = L.goalProgress(g, S.accounts, S.balances, S.rates, m);
-  var sub = p.done ? '已达成 🎉' : '还差 ' + rm(p.remaining) + (p.perMonth != null ? ' · 到 ' + g.targetMonth + ' 每月需存 ' + rm(p.perMonth) : p.monthsLeft === 0 && g.targetMonth ? ' · 已到目标月份' : '') + (g.kind === 'networth' ? ' · 按家庭净资产' : g.accountId ? ' · 按 ' + accName(g.accountId) + ' 余额' : '');
+  var sub = p.done ? '已达成 🎉' : '还差 ' + rm(p.remaining) + (p.perMonth != null ? ' · 到 ' + g.targetMonth + ' 每月需存 ' + rm(p.perMonth) : p.monthsLeft === 0 && g.targetMonth ? ' · 已到目标月份' : '') + (g.kind === 'networth' ? ' · 按家庭净资产' : g.kind === 'investable' ? ' · 按可投资资产（不含房产车辆）' : g.accountId ? ' · 按 ' + accName(g.accountId) + ' 余额' : '');
   if (g.kind === 'networth' && !p.done) {
     var fc = L.netWorthForecast(L.netWorthTrend(S.accounts, S.balances, S.rates, L.monthRange(m, 12)).map(function (x) { var sn = S.snapshots[x.month]; return sn ? { month: x.month, net: sn.net } : x; }), p.target);
     sub += fc.months == null ? (fc.rate == null ? ' · 多几个月数据后可预测' : ' · 目前净资产没有增长，无法预测') : ' · 按目前速度（每月 ' + signed(fc.rate) + '）约 ' + fc.when + ' 达成';
@@ -2583,7 +2592,7 @@ function openGoal(id) {
   var g = id ? S.goals[id] : null;
   fillAll();
   $('gTitle').textContent = g ? '修改目标' : '新增储蓄目标';
-  $('gKind').value = g && g.kind === 'networth' ? 'networth' : 'saving';
+  $('gKind').value = g && (g.kind === 'networth' || g.kind === 'investable') ? g.kind : 'saving';
   $('gName').value = g ? g.name : ''; $('gTarget').value = g ? g.target : ''; $('gSaved').value = g && g.saved ? g.saved : '';
   $('gAcc').value = g && g.accountId ? g.accountId : ''; $('gMonth').value = g && g.targetMonth ? g.targetMonth : '';
   $('gDel').hidden = !g; $('gDel').textContent = '删除';
