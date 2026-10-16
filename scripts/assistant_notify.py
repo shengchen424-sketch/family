@@ -27,6 +27,7 @@ BULL = "/root/smart-trader/data/strategy1/bull_signals.json"
 APP_URL = "https://chen-family424.duckdns.org:8444/"
 MYT = dt.timezone(dt.timedelta(hours=8))
 PREFIX = "【理财助理】"
+RECIPIENT = os.environ.get("FAMILY_RECIPIENT", "Chen")  # messages go to the owner's own WhatsApp self-chat
 NON_PRODUCTIVE = ("房产", "车辆")
 
 
@@ -91,12 +92,19 @@ def rate_for(rates, month):
     return None
 
 
+def visible_to_recipient(a):
+    """Private accounts (account.private = member id) belong to that member only; the recipient
+    (family owner, RECIPIENT) may see them only when flagged auditable. Same rule as server.js."""
+    p = a.get("private")
+    return not p or p == RECIPIENT or bool(a.get("auditable"))
+
+
 def account_rows(accounts, balances, rates, month):
     """Latest balance per active account as of month (RM)."""
     rate = rate_for(rates, month) or 1.0
     out = []
     for aid, a in accounts.items():
-        if a.get("active") is False:
+        if a.get("active") is False or not visible_to_recipient(a):
             continue
         best = None
         for b in balances.values():
