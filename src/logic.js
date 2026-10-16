@@ -1139,6 +1139,93 @@
     return { version: RULES_VERSION, tasks: out, left: 0 };
   }
 
+  // ---------- saving methods: catalog + schedules + progress + before/after comparison ----------
+  var SAVING_METHODS = [
+    { key: 'ratio', group: '比例法', name: '50 / 30 / 20', who: '刚开始、收入稳定', rule: '必需 50%、想要 30%、储蓄与还债 20%；比例可自己调', params: [['save', '储蓄比例 %', 20]] },
+    { key: 'pyf', group: '比例法', name: '先付自己（Pay Yourself First）', who: '所有人，最有效', rule: '发薪日先转一个比例到不可动账户，剩下才花', params: [['save', '每次收入先存 %', 20]] },
+    { key: 'percent', group: '比例法', name: '按收入比例存（不固定收入）', who: '自雇、佣金、生意', rule: '每一笔进账先存固定比例，收入多存多、少存少', params: [['save', '每笔收入存 %', 30]] },
+    { key: 'raise', group: '比例法', name: '加薪全存 / 奖金一半', who: '收入在涨的人', rule: '收入高于基线的部分 100% 存，奖金至少存一半', params: [['base', '月收入基线 RM', 0]] },
+    { key: 'c52', group: '挑战', name: '52 周递增', who: '喜欢游戏感', rule: '第 n 周存 n × 单位（单位 1 → 全年 RM1,378；单位 10 → RM13,780）', params: [['unit', '单位 RM', 10]], weeks: 52 },
+    { key: 'c52r', group: '挑战', name: '52 周递减', who: '年底开销大', rule: '从 52 × 单位开始递减，前紧后松', params: [['unit', '单位 RM', 10]], weeks: 52 },
+    { key: 'c365', group: '挑战', name: '365 天固定', who: '养成每天的习惯', rule: '每天存固定金额，日历打卡', params: [['unit', '每天 RM', 5]], days: 365 },
+    { key: 'grid100', group: '挑战', name: '100 格存钱', who: '收入不固定、小生意', rule: '100 个格子写 1–100 × 单位，随机存一格划掉，满格共 5050 × 单位', params: [['unit', '单位 RM', 1]], cells: 100 },
+    { key: 'roundup', group: '挑战', name: '零头归整', who: '常刷卡、电子钱包', rule: '每笔支出凑到整十，差额月底一次转存', params: [['to', '凑整到 RM', 10]] },
+    { key: 'nospend', group: '挑战', name: '无消费日', who: '想戒冲动消费', rule: '每周挑 N 天只花必需，日历打卡', params: [['days', '每周目标天数', 2]] },
+    { key: 'envelope', group: '结构法', name: '信封预算', who: '控制不住刷卡', rule: '每个分类设月预算，花完即停（用分类预算实现）', params: [] },
+    { key: 'zero', group: '结构法', name: '零基预算', who: '想精细控制现金流', rule: '月初把每一元收入分配到用途，未分配为零', params: [] },
+    { key: 'kakeibo', group: '结构法', name: '日本家计簿 Kakeibo', who: '喜欢反思', rule: '月初写收入与固定支出和想存的数；月末回答四问：有多少、想存多少、花了多少、如何改进', params: [['save', '本月想存 RM', 0]] },
+    { key: 'sinking', group: '目标法', name: '沉没基金', who: '每年被大额账单打乱', rule: '车险、路税、保费、学费按月摊存（定期项目标“年缴”）', params: [] },
+    { key: 'ladder', group: '目标法', name: '紧急备用金阶梯', who: '所有人第一步', rule: 'RM1,000 → 1 个月开销 → 3 个月 → 6 个月，一级一级来', params: [] },
+    { key: 'fd12', group: '目标法', name: '12 存单定存', who: '要利息也要流动性', rule: '每月存一张 12 个月定存，一年后每月都有一张到期', params: [['unit', '每月 RM', 1000]] }
+  ];
+  function methodByKey(k) { for (var i = 0; i < SAVING_METHODS.length; i++) if (SAVING_METHODS[i].key === k) return SAVING_METHODS[i]; return null; }
+  function addDaysISO(iso, n) { return new Date(Date.parse(iso + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10); }
+  // Schedule for challenge methods: items with index, due date, amount; done = array of indexes already saved.
+  function methodSchedule(m, today) {
+    var def = methodByKey(m.key), unit = Number((m.params || {}).unit) || 1, start = m.startDate || today, done = m.done || [], out = [];
+    if (!def) return out;
+    var isDone = function (i) { return done.indexOf(i) >= 0; };
+    if (def.weeks) for (var w = 1; w <= def.weeks; w++) out.push({ idx: w, date: addDaysISO(start, (w - 1) * 7), amount: round2((def.key === 'c52r' ? 53 - w : w) * unit), done: isDone(w), due: addDaysISO(start, (w - 1) * 7) <= today });
+    else if (def.days) for (var d = 1; d <= def.days; d++) out.push({ idx: d, date: addDaysISO(start, d - 1), amount: unit, done: isDone(d), due: addDaysISO(start, d - 1) <= today });
+    else if (def.cells) for (var c = 1; c <= def.cells; c++) out.push({ idx: c, date: null, amount: round2(c * unit), done: isDone(c), due: true });
+    return out;
+  }
+  // Round-up: how much the month's expenses would add if each were rounded up to `to`.
+  function roundupAmount(tx, month, to) {
+    to = Number(to) || 10; var sum = 0;
+    (tx || []).forEach(function (t) { if (t.month !== month || t.type !== 'expense') return; var a = Number(t.amount) || 0; var r = Math.ceil(a / to) * to - a; if (r > 0 && r < to) sum += r; });
+    return round2(sum);
+  }
+  // Progress of one method for month `month`.
+  function methodProgress(m, ctx) {
+    var def = methodByKey(m.key), tx = ctx.tx || [], month = ctx.month, today = ctx.today, p = m.params || {};
+    if (!def) return null;
+    var cf = cashflow(tx, month), saved = Math.max(0, cf.net), out = { key: m.key, name: def.name, target: null, actual: null, pct: null, text: '' };
+    if (def.key === 'ratio' || def.key === 'pyf' || def.key === 'percent' || def.key === 'kakeibo') {
+      var pctWant = def.key === 'kakeibo' ? null : (Number(p.save) || 20) / 100;
+      out.target = def.key === 'kakeibo' ? round2(Number(p.save) || 0) : round2(cf.income * pctWant);
+      out.actual = round2(saved);
+      out.pct = out.target > 0 ? Math.min(1, out.actual / out.target) : (cf.income > 0 ? 0 : null);
+      out.text = cf.income > 0 ? '本月收入 ' + cf.income.toFixed(0) + '，目标存 ' + out.target.toFixed(0) + '，目前结余 ' + out.actual.toFixed(0) : '本月还没有收入记录';
+    } else if (def.key === 'raise') {
+      var base = Number(p.base) || 0, extra = Math.max(0, cf.income - base);
+      out.target = round2(extra); out.actual = round2(Math.min(saved, extra)); out.pct = extra > 0 ? Math.min(1, out.actual / extra) : null;
+      out.text = extra > 0 ? '本月收入比基线多 ' + extra.toFixed(0) + '，这部分应全部存起来' : '本月收入没有超过基线 ' + base.toFixed(0);
+    } else if (def.weeks || def.days || def.cells) {
+      var sch = methodSchedule(m, today), due = sch.filter(function (x) { return x.due; }), dn = sch.filter(function (x) { return x.done; });
+      out.target = round2(sch.reduce(function (a, x) { return a + x.amount; }, 0)); out.actual = round2(dn.reduce(function (a, x) { return a + x.amount; }, 0));
+      out.pct = out.target > 0 ? out.actual / out.target : 0;
+      var overdue = due.filter(function (x) { return !x.done; }).length;
+      out.text = '已存 ' + dn.length + ' / ' + sch.length + (def.cells ? ' 格' : def.weeks ? ' 周' : ' 天') + '，共 ' + out.actual.toFixed(0) + ' / ' + out.target.toFixed(0) + (overdue ? '，有 ' + overdue + ' 期还没打卡' : '');
+      out.overdue = overdue;
+    } else if (def.key === 'roundup') {
+      out.target = roundupAmount(tx, month, p.to); out.actual = (m.collected || {})[month] ? out.target : 0; out.pct = out.target > 0 ? (out.actual ? 1 : 0) : null;
+      out.text = '本月零头合计 ' + out.target.toFixed(2) + ((m.collected || {})[month] ? '，已转存' : '，月底转存到储蓄户口');
+    } else if (def.key === 'nospend') {
+      var days = (m.marks || []).filter(function (d) { return d.slice(0, 7) === month; }).length, weeks = Math.max(1, Math.ceil(Number(today.slice(8)) / 7));
+      out.target = (Number(p.days) || 2) * weeks; out.actual = days; out.pct = Math.min(1, days / out.target);
+      out.text = '本月无消费日 ' + days + ' 天（目标到今天约 ' + out.target + ' 天）';
+    } else if (def.key === 'ladder') {
+      var liquid = ctx.liquid || 0, exp = ctx.avgExpense || 0, steps = [1000, exp, exp * 3, exp * 6].filter(function (x) { return x > 0; });
+      var idx = 0; while (idx < steps.length && liquid >= steps[idx]) idx++;
+      out.target = steps[Math.min(idx, steps.length - 1)] || 1000; out.actual = round2(liquid); out.pct = out.target ? Math.min(1, liquid / out.target) : null;
+      out.text = idx >= steps.length ? '备用金阶梯已全部完成' : '第 ' + (idx + 1) + ' 级：目标 ' + out.target.toFixed(0) + '，现在 ' + liquid.toFixed(0);
+    } else {
+      out.text = def.rule;
+    }
+    return out;
+  }
+  // Did the method help? Savings rate in the months since start vs the 3 months before.
+  function methodComparison(m, tx, month) {
+    var start = (m.startDate || month).slice(0, 7);
+    var after = [], before = [];
+    for (var x = start; x <= month; x = addMonths(x, 1)) { var c = cashflow(tx, x); if (c.income > 0) after.push(c.net / c.income); if (after.length > 24) break; }
+    monthRange(addMonths(start, -1), 3).forEach(function (bm) { var c = cashflow(tx, bm); if (c.income > 0) before.push(c.net / c.income); });
+    var avg = function (a) { return a.length ? a.reduce(function (s, v) { return s + v; }, 0) / a.length : null; };
+    var b = avg(before), a = avg(after);
+    return { before: b, after: a, delta: b != null && a != null ? a - b : null, monthsAfter: after.length, monthsBefore: before.length };
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -1168,7 +1255,8 @@
     memberCategoryMatrix: memberCategoryMatrix, cashflowForecast: cashflowForecast, fiCalc: fiCalc, prepaySim: prepaySim, coverCheck: coverCheck,
     compareShares: compareShares, parseSpeech: parseSpeech, MY_HOUSEHOLD_SHARES: MY_HOUSEHOLD_SHARES,
     parseReceipt: parseReceipt, MERCHANT_RULES: MERCHANT_RULES,
-    RULES_VERSION: RULES_VERSION, EPF_RIA: EPF_RIA, healthDiagnosis: healthDiagnosis, allocatable: allocatable, allocationPlan: allocationPlan, recurringMonthly: recurringMonthly
+    RULES_VERSION: RULES_VERSION, EPF_RIA: EPF_RIA, healthDiagnosis: healthDiagnosis, allocatable: allocatable, allocationPlan: allocationPlan, recurringMonthly: recurringMonthly,
+    SAVING_METHODS: SAVING_METHODS, methodByKey: methodByKey, methodSchedule: methodSchedule, methodProgress: methodProgress, roundupAmount: roundupAmount, methodComparison: methodComparison
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;

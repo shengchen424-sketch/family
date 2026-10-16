@@ -188,6 +188,16 @@ body.lite .nav [data-tab="ledger"]{display:none}
 .dims div{font-size:11.5px;color:var(--muted);text-align:center}
 .dims b{display:block;font-size:14px;color:var(--ink)}
 .dims .bar-track{margin-top:3px}
+.grid52{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin:8px 0}
+.grid52 button{font:inherit;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:6px 2px;background:var(--surface);color:var(--ink);cursor:pointer;min-width:0}
+.grid52 button.done{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.grid52 button.due{border-color:var(--warn)}
+.grid52.g10{grid-template-columns:repeat(10,1fr)}
+.mcat{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+.mcat:hover{border-color:var(--accent)}
+.mcat b{display:block}
+.mcat small{color:var(--muted);display:block}
+.mcat .who{color:var(--accent);font-size:12px}
 .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;margin-bottom:10px}
 .cal .hd{font-size:11px;color:var(--muted);text-align:center;padding:2px 0}
 .cal button{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:5px 2px;min-height:48px;display:flex;flex-direction:column;align-items:center;gap:1px;cursor:pointer;min-width:0}
@@ -467,6 +477,10 @@ body.lite .nav [data-tab="ledger"]{display:none}
 
   <!-- ===== 预算与定期 ===== -->
   <section class="view" id="v-plan" hidden>
+    <h3>我的存钱法</h3>
+    <div id="methodList"></div>
+    <div class="bar-row" style="margin:8px 0 4px"><button class="btn small primary" id="pickMethodBtn">+ 选择存钱法</button></div>
+
     <h3>本月分类预算</h3>
     <ul class="list" id="budgets"></ul>
     <div class="bar-row" style="margin-top:8px"><button class="btn small" data-act="new-cat">+ 新增分类</button></div>
@@ -752,6 +766,22 @@ body.lite .nav [data-tab="ledger"]{display:none}
     <div class="steps" id="wzBar"></div>
     <div id="wzBody"></div>
     <div class="acts"><button class="btn" id="wzBack" type="button">上一步</button><button class="btn primary" id="wzNext" type="button">下一步</button></div>
+  </div>
+</div>
+
+<!-- Saving method catalog -->
+<div class="sheet" id="methodSheet" hidden>
+  <div class="panelbox" role="dialog" aria-modal="true">
+    <div class="ph"><div><h2>选择存钱法</h2><div class="muted">挑一种能坚持的；可以同时用两三种。</div></div><button class="btn small" data-close>关闭</button></div>
+    <div id="methodCatalog"></div>
+  </div>
+</div>
+<div class="sheet" id="methodSetup" hidden>
+  <div class="panelbox" role="dialog" aria-modal="true">
+    <div class="ph"><div><h2 id="msTitle"></h2><div class="muted" id="msRule"></div></div><button class="btn small" data-close>关闭</button></div>
+    <div class="fields" id="msFields"></div>
+    <div class="acts"><button class="btn danger" id="msRemove" hidden>停用</button><button class="btn primary" id="msSave">开始</button></div>
+    <div id="msDetail"></div>
   </div>
 </div>
 
@@ -1384,6 +1414,13 @@ function renderActionPlan() {
   } else {
     h += '<div class="task"><b>还没有可分配的钱</b><p>' + esc(plan.note || '先补上收入与固定支出的定期项目，系统才能算出每月能安排多少。') + '</p><div class="acts" style="justify-content:flex-start;margin:0"><button class="btn small" data-act="new-rec">添加定期收入/支出</button></div></div>';
   }
+  var methods = methodsDoc();
+  if (methods.length) {
+    var mctx = methodCtx();
+    h += '<div class="task"><div class="lbl">我的存钱法</div>' + methods.map(function (mm) { var p = L.methodProgress(mm, mctx) || {}; return '<div style="font-size:13px;margin:4px 0"><b>' + esc(p.name || mm.key) + '</b> <span class="muted">' + esc(p.text || '') + '</span></div>'; }).join('') + '<div class="acts" style="justify-content:flex-start;margin:4px 0 0"><button class="btn small" data-tab="plan">去打卡 ›</button></div></div>';
+  } else {
+    h += '<div class="task"><div class="lbl">还没有选存钱法</div><div class="acts" style="justify-content:flex-start;margin:4px 0 0"><button class="btn small" id="homePickMethod">选一种存钱法 ›</button></div></div>';
+  }
   if (tasks.length) {
     h += '<div class="lbl" style="margin-top:10px">本月财务进展 · ' + done.length + ' 项已完成，' + open.length + ' 项待处理</div>';
     h += '<div class="bar-track"><div class="bar-fill" style="width:' + (tasks.length ? done.length / tasks.length * 100 : 0).toFixed(0) + '%"></div></div>';
@@ -1417,10 +1454,115 @@ document.addEventListener('click', function (e) {
   var b = e.target.closest('[data-task]');
   if (b) return taskAction(b.dataset.id, b.dataset.task);
   if (e.target.closest('#healthOpen')) return openHealth();
+  if (e.target.id === 'homePickMethod') return openMethodCatalog();
 });
 $('hsSave').addEventListener('click', function () {
   var body = Object.assign({}, prefs(), { birthYear: Number($('hsBirth').value) || null, lifeCover: Number($('hsCover').value) || 0 });
   S.db.collection('settings').doc('prefs').set(body).then(function () { closeSheets(); toast('已保存'); }).catch(function (x) { toast(errText(x)); });
+});
+
+// ---------- saving methods ----------
+function methodsDoc() { return (S.settings.savingMethods && S.settings.savingMethods.methods) || []; }
+function saveMethods(list) { return S.db.collection('settings').doc('savingMethods').set({ methods: list, updatedAt: new Date().toISOString() }); }
+function methodCtx() {
+  var diag = diagNow();
+  return { tx: txArr(), month: S.month, today: L.todayKuching(), liquid: diag.liquid, avgExpense: diag.expense };
+}
+function renderMethods() {
+  var list = methodsDoc(), ctx = methodCtx();
+  $('methodList').innerHTML = list.length ? '<ul class="list">' + list.map(function (m, i) {
+    var p = L.methodProgress(m, ctx) || {}, def = L.methodByKey(m.key) || {};
+    var cmp = L.methodComparison(m, ctx.tx, S.month);
+    var cmpTxt = cmp.delta != null && cmp.monthsAfter >= 1 && cmp.monthsBefore >= 1 ? ' · 储蓄率 ' + (cmp.before * 100).toFixed(0) + '% → ' + (cmp.after * 100).toFixed(0) + '%' : '';
+    return '<li class="li" style="display:block"><button class="row" data-method="' + i + '" style="padding:0;width:100%"><span class="n"><b>' + esc(def.name || m.key) + '</b><small>' + esc((p.text || def.rule || '') + cmpTxt) + '</small></span><span class="v"><b>' + (p.pct == null ? '—' : (p.pct * 100).toFixed(0) + '%') + '</b></span></button>' +
+      (p.pct != null ? '<div class="bar-track"><div class="bar-fill ' + (p.overdue ? 'warn' : '') + '" style="width:' + (p.pct * 100).toFixed(0) + '%"></div></div>' : '') + '</li>';
+  }).join('') + '</ul>' : '<div class="empty">还没有选存钱法。先选一种，首页会每月提醒你要存多少、打卡进度。</div>';
+}
+function openMethodCatalog() {
+  var groups = {};
+  L.SAVING_METHODS.forEach(function (m) { (groups[m.group] = groups[m.group] || []).push(m); });
+  var active = methodsDoc().map(function (m) { return m.key; });
+  $('methodCatalog').innerHTML = Object.keys(groups).map(function (g) {
+    return '<h3>' + esc(g) + '</h3>' + groups[g].map(function (m) {
+      return '<div class="mcat" data-pick="' + m.key + '"><b>' + esc(m.name) + (active.indexOf(m.key) >= 0 ? ' <span class="tag">使用中</span>' : '') + '</b><span class="who">适合：' + esc(m.who) + '</span><small>' + esc(m.rule) + '</small></div>';
+    }).join('');
+  }).join('');
+  $('methodSheet').hidden = false;
+}
+var msCurrent = null;
+function openMethodSetup(key, idx) {
+  var def = L.methodByKey(key); if (!def) return;
+  var existing = idx != null ? methodsDoc()[idx] : null;
+  msCurrent = { key: key, idx: idx != null ? idx : null };
+  $('msTitle').textContent = def.name; $('msRule').textContent = def.rule + ' · 适合：' + def.who;
+  var params = (existing && existing.params) || {};
+  $('msFields').innerHTML = def.params.map(function (p) { return '<label>' + esc(p[1]) + '<input data-param="' + p[0] + '" type="text" inputmode="decimal" value="' + esc(params[p[0]] != null ? params[p[0]] : p[2]) + '"></label>'; }).join('') +
+    (def.weeks || def.days ? '<label>开始日期<input id="msStart" type="date" value="' + esc((existing && existing.startDate) || L.todayKuching()) + '"></label>' : '');
+  $('msRemove').hidden = !existing; $('msSave').textContent = existing ? '保存' : '开始';
+  var detail = '';
+  if (existing) {
+    var ctx = methodCtx(), p = L.methodProgress(existing, ctx);
+    if (def.weeks || def.days || def.cells) {
+      var sch = L.methodSchedule(existing, ctx.today), show = def.days ? sch.filter(function (x) { return x.date && x.date.slice(0, 7) === S.month; }) : sch;
+      detail = '<h3>' + (def.days ? S.month + ' 打卡' : '打卡格子，点一下表示已存') + '</h3><div class="grid52 ' + (def.cells ? 'g10' : '') + '">' + show.map(function (x) {
+        return '<button type="button" data-cell="' + x.idx + '" class="' + (x.done ? 'done' : x.due ? 'due' : '') + '" title="' + esc(x.date || '') + '">' + (def.days ? Number(x.date.slice(8)) : x.idx) + (def.days ? '' : '<br>' + x.amount) + '</button>';
+      }).join('') + '</div><div class="muted">' + esc(p.text) + '</div>';
+    } else if (def.key === 'roundup') {
+      detail = '<div class="muted" style="margin-top:10px">' + esc(p.text) + '</div>' + (p.target > 0 && !p.actual ? '<div class="acts" style="justify-content:flex-start"><button class="btn small primary" id="msRoundupDone">已转存本月零头 ' + rm(p.target) + '</button></div>' : '');
+    } else if (def.key === 'nospend') {
+      var marks = existing.marks || [], days = L.calendarGrid(S.month);
+      detail = '<h3>' + S.month + ' 无消费日（点日期打卡）</h3><div class="grid52" style="grid-template-columns:repeat(7,1fr)">' + days.flat().map(function (d) { return d ? '<button type="button" data-mark="' + d + '" class="' + (marks.indexOf(d) >= 0 ? 'done' : '') + '">' + Number(d.slice(8)) + '</button>' : '<span></span>'; }).join('') + '</div><div class="muted">' + esc(p.text) + '</div>';
+    } else if (def.key === 'kakeibo') {
+      var k = (existing.kakeibo || {})[S.month] || {};
+      detail = '<h3>' + S.month + ' 月末四问</h3><div class="fields"><label>有多少钱？<input data-kk="have" type="text" value="' + esc(k.have || '') + '"></label><label>想存多少？<input data-kk="want" type="text" value="' + esc(k.want || '') + '"></label><label class="full">花了多少、花在哪？<input data-kk="spent" type="text" value="' + esc(k.spent || '') + '"></label><label class="full">下个月怎么改进？<input data-kk="improve" type="text" value="' + esc(k.improve || '') + '"></label></div>';
+    } else {
+      detail = '<div class="muted" style="margin-top:10px">' + esc(p.text) + '</div>';
+      if (def.key === 'envelope') detail += '<div class="acts" style="justify-content:flex-start"><button class="btn small" data-act="new-cat">去设分类预算</button></div>';
+      if (def.key === 'sinking') detail += '<div class="acts" style="justify-content:flex-start"><button class="btn small" data-act="new-rec">去添加年缴项目</button></div>';
+    }
+  }
+  $('msDetail').innerHTML = detail;
+  $('methodSetup').hidden = false;
+}
+async function saveMethodSetup(remove) {
+  var list = methodsDoc().slice(), def = L.methodByKey(msCurrent.key);
+  if (remove) { if (msCurrent.idx != null) list.splice(msCurrent.idx, 1); }
+  else {
+    var params = {}; $('msFields').querySelectorAll('[data-param]').forEach(function (i) { params[i.dataset.param] = L.evalAmount(i.value); });
+    var m = msCurrent.idx != null ? Object.assign({}, list[msCurrent.idx]) : { key: msCurrent.key, startDate: L.todayKuching(), done: [] };
+    m.params = params;
+    if ($('msStart')) m.startDate = $('msStart').value || m.startDate;
+    var kk = {}; var any = false; $('msDetail').querySelectorAll('[data-kk]').forEach(function (i) { kk[i.dataset.kk] = i.value.trim(); if (i.value.trim()) any = true; });
+    if (any) { m.kakeibo = Object.assign({}, m.kakeibo || {}); m.kakeibo[S.month] = kk; }
+    if (msCurrent.idx != null) list[msCurrent.idx] = m; else list.push(m);
+  }
+  try { await saveMethods(list); audit(remove ? '停用存钱法' : '存钱法', msCurrent.key, def ? def.name : ''); track(remove ? 'method_off' : 'method_on'); closeSheets(); toast(remove ? '已停用' : '已开始'); }
+  catch (e) { toast(errText(e)); }
+}
+async function toggleCell(idx) {
+  var list = methodsDoc().slice(), m = Object.assign({}, list[msCurrent.idx]); var done = (m.done || []).slice();
+  var at = done.indexOf(idx); if (at >= 0) done.splice(at, 1); else done.push(idx);
+  m.done = done; list[msCurrent.idx] = m;
+  try { await saveMethods(list); track('method_tick'); openMethodSetup(m.key, msCurrent.idx); } catch (e) { toast(errText(e)); }
+}
+async function toggleMark(day) {
+  var list = methodsDoc().slice(), m = Object.assign({}, list[msCurrent.idx]); var marks = (m.marks || []).slice();
+  var at = marks.indexOf(day); if (at >= 0) marks.splice(at, 1); else marks.push(day);
+  m.marks = marks; list[msCurrent.idx] = m;
+  try { await saveMethods(list); openMethodSetup(m.key, msCurrent.idx); } catch (e) { toast(errText(e)); }
+}
+$('pickMethodBtn').addEventListener('click', openMethodCatalog);
+$('methodCatalog').addEventListener('click', function (e) { var c = e.target.closest('[data-pick]'); if (!c) return; var key = c.dataset.pick, idx = methodsDoc().findIndex(function (m) { return m.key === key; }); $('methodSheet').hidden = true; openMethodSetup(key, idx >= 0 ? idx : null); });
+$('methodList').addEventListener('click', function (e) { var b = e.target.closest('[data-method]'); if (!b) return; var m = methodsDoc()[Number(b.dataset.method)]; if (m) openMethodSetup(m.key, Number(b.dataset.method)); });
+$('msSave').addEventListener('click', function () { saveMethodSetup(false); });
+$('msRemove').addEventListener('click', function () { saveMethodSetup(true); });
+$('msDetail').addEventListener('click', function (e) {
+  var c = e.target.closest('[data-cell]'); if (c) return toggleCell(Number(c.dataset.cell));
+  var mk = e.target.closest('[data-mark]'); if (mk) return toggleMark(mk.dataset.mark);
+  if (e.target.id === 'msRoundupDone') {
+    var list = methodsDoc().slice(), m = Object.assign({}, list[msCurrent.idx]); m.collected = Object.assign({}, m.collected || {}); m.collected[S.month] = true; list[msCurrent.idx] = m;
+    saveMethods(list).then(function () { toast('已记录'); openMethodSetup(m.key, msCurrent.idx); });
+  }
 });
 
 // ---------- charts (inline SVG, no library) ----------
@@ -2052,6 +2194,7 @@ function renderPlan() {
       (budget > 0 ? '<div class="bar-track"><div class="bar-fill ' + (over ? 'over' : pct > 80 ? 'warn' : '') + '" style="width:' + Math.min(100, pct).toFixed(1) + '%"></div></div>' : '') + '</li>';
   }).join('') || '<li class="empty">还没有支出分类</li>';
 
+  renderMethods();
   var pend = L.recurringForMonth(recArr(), txs, m);
   $('pendingRec').innerHTML = pend.filter(function (x) { return !x.done; }).map(function (x) {
     var r = x.rec;

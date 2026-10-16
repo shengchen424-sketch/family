@@ -200,6 +200,16 @@ body.lite .nav [data-tab="ledger"]{display:none}
 .dims div{font-size:11.5px;color:var(--muted);text-align:center}
 .dims b{display:block;font-size:14px;color:var(--ink)}
 .dims .bar-track{margin-top:3px}
+.grid52{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin:8px 0}
+.grid52 button{font:inherit;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:6px 2px;background:var(--surface);color:var(--ink);cursor:pointer;min-width:0}
+.grid52 button.done{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.grid52 button.due{border-color:var(--warn)}
+.grid52.g10{grid-template-columns:repeat(10,1fr)}
+.mcat{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+.mcat:hover{border-color:var(--accent)}
+.mcat b{display:block}
+.mcat small{color:var(--muted);display:block}
+.mcat .who{color:var(--accent);font-size:12px}
 .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;margin-bottom:10px}
 .cal .hd{font-size:11px;color:var(--muted);text-align:center;padding:2px 0}
 .cal button{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:5px 2px;min-height:48px;display:flex;flex-direction:column;align-items:center;gap:1px;cursor:pointer;min-width:0}
@@ -479,6 +489,10 @@ body.lite .nav [data-tab="ledger"]{display:none}
 
   <!-- ===== 预算与定期 ===== -->
   <section class="view" id="v-plan" hidden>
+    <h3>我的存钱法</h3>
+    <div id="methodList"></div>
+    <div class="bar-row" style="margin:8px 0 4px"><button class="btn small primary" id="pickMethodBtn">+ 选择存钱法</button></div>
+
     <h3>本月分类预算</h3>
     <ul class="list" id="budgets"></ul>
     <div class="bar-row" style="margin-top:8px"><button class="btn small" data-act="new-cat">+ 新增分类</button></div>
@@ -764,6 +778,22 @@ body.lite .nav [data-tab="ledger"]{display:none}
     <div class="steps" id="wzBar"></div>
     <div id="wzBody"></div>
     <div class="acts"><button class="btn" id="wzBack" type="button">上一步</button><button class="btn primary" id="wzNext" type="button">下一步</button></div>
+  </div>
+</div>
+
+<!-- Saving method catalog -->
+<div class="sheet" id="methodSheet" hidden>
+  <div class="panelbox" role="dialog" aria-modal="true">
+    <div class="ph"><div><h2>选择存钱法</h2><div class="muted">挑一种能坚持的；可以同时用两三种。</div></div><button class="btn small" data-close>关闭</button></div>
+    <div id="methodCatalog"></div>
+  </div>
+</div>
+<div class="sheet" id="methodSetup" hidden>
+  <div class="panelbox" role="dialog" aria-modal="true">
+    <div class="ph"><div><h2 id="msTitle"></h2><div class="muted" id="msRule"></div></div><button class="btn small" data-close>关闭</button></div>
+    <div class="fields" id="msFields"></div>
+    <div class="acts"><button class="btn danger" id="msRemove" hidden>停用</button><button class="btn primary" id="msSave">开始</button></div>
+    <div id="msDetail"></div>
   </div>
 </div>
 
@@ -1994,6 +2024,93 @@ body.lite .nav [data-tab="ledger"]{display:none}
     return { version: RULES_VERSION, tasks: out, left: 0 };
   }
 
+  // ---------- saving methods: catalog + schedules + progress + before/after comparison ----------
+  var SAVING_METHODS = [
+    { key: 'ratio', group: '比例法', name: '50 / 30 / 20', who: '刚开始、收入稳定', rule: '必需 50%、想要 30%、储蓄与还债 20%；比例可自己调', params: [['save', '储蓄比例 %', 20]] },
+    { key: 'pyf', group: '比例法', name: '先付自己（Pay Yourself First）', who: '所有人，最有效', rule: '发薪日先转一个比例到不可动账户，剩下才花', params: [['save', '每次收入先存 %', 20]] },
+    { key: 'percent', group: '比例法', name: '按收入比例存（不固定收入）', who: '自雇、佣金、生意', rule: '每一笔进账先存固定比例，收入多存多、少存少', params: [['save', '每笔收入存 %', 30]] },
+    { key: 'raise', group: '比例法', name: '加薪全存 / 奖金一半', who: '收入在涨的人', rule: '收入高于基线的部分 100% 存，奖金至少存一半', params: [['base', '月收入基线 RM', 0]] },
+    { key: 'c52', group: '挑战', name: '52 周递增', who: '喜欢游戏感', rule: '第 n 周存 n × 单位（单位 1 → 全年 RM1,378；单位 10 → RM13,780）', params: [['unit', '单位 RM', 10]], weeks: 52 },
+    { key: 'c52r', group: '挑战', name: '52 周递减', who: '年底开销大', rule: '从 52 × 单位开始递减，前紧后松', params: [['unit', '单位 RM', 10]], weeks: 52 },
+    { key: 'c365', group: '挑战', name: '365 天固定', who: '养成每天的习惯', rule: '每天存固定金额，日历打卡', params: [['unit', '每天 RM', 5]], days: 365 },
+    { key: 'grid100', group: '挑战', name: '100 格存钱', who: '收入不固定、小生意', rule: '100 个格子写 1–100 × 单位，随机存一格划掉，满格共 5050 × 单位', params: [['unit', '单位 RM', 1]], cells: 100 },
+    { key: 'roundup', group: '挑战', name: '零头归整', who: '常刷卡、电子钱包', rule: '每笔支出凑到整十，差额月底一次转存', params: [['to', '凑整到 RM', 10]] },
+    { key: 'nospend', group: '挑战', name: '无消费日', who: '想戒冲动消费', rule: '每周挑 N 天只花必需，日历打卡', params: [['days', '每周目标天数', 2]] },
+    { key: 'envelope', group: '结构法', name: '信封预算', who: '控制不住刷卡', rule: '每个分类设月预算，花完即停（用分类预算实现）', params: [] },
+    { key: 'zero', group: '结构法', name: '零基预算', who: '想精细控制现金流', rule: '月初把每一元收入分配到用途，未分配为零', params: [] },
+    { key: 'kakeibo', group: '结构法', name: '日本家计簿 Kakeibo', who: '喜欢反思', rule: '月初写收入与固定支出和想存的数；月末回答四问：有多少、想存多少、花了多少、如何改进', params: [['save', '本月想存 RM', 0]] },
+    { key: 'sinking', group: '目标法', name: '沉没基金', who: '每年被大额账单打乱', rule: '车险、路税、保费、学费按月摊存（定期项目标“年缴”）', params: [] },
+    { key: 'ladder', group: '目标法', name: '紧急备用金阶梯', who: '所有人第一步', rule: 'RM1,000 → 1 个月开销 → 3 个月 → 6 个月，一级一级来', params: [] },
+    { key: 'fd12', group: '目标法', name: '12 存单定存', who: '要利息也要流动性', rule: '每月存一张 12 个月定存，一年后每月都有一张到期', params: [['unit', '每月 RM', 1000]] }
+  ];
+  function methodByKey(k) { for (var i = 0; i < SAVING_METHODS.length; i++) if (SAVING_METHODS[i].key === k) return SAVING_METHODS[i]; return null; }
+  function addDaysISO(iso, n) { return new Date(Date.parse(iso + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10); }
+  // Schedule for challenge methods: items with index, due date, amount; done = array of indexes already saved.
+  function methodSchedule(m, today) {
+    var def = methodByKey(m.key), unit = Number((m.params || {}).unit) || 1, start = m.startDate || today, done = m.done || [], out = [];
+    if (!def) return out;
+    var isDone = function (i) { return done.indexOf(i) >= 0; };
+    if (def.weeks) for (var w = 1; w <= def.weeks; w++) out.push({ idx: w, date: addDaysISO(start, (w - 1) * 7), amount: round2((def.key === 'c52r' ? 53 - w : w) * unit), done: isDone(w), due: addDaysISO(start, (w - 1) * 7) <= today });
+    else if (def.days) for (var d = 1; d <= def.days; d++) out.push({ idx: d, date: addDaysISO(start, d - 1), amount: unit, done: isDone(d), due: addDaysISO(start, d - 1) <= today });
+    else if (def.cells) for (var c = 1; c <= def.cells; c++) out.push({ idx: c, date: null, amount: round2(c * unit), done: isDone(c), due: true });
+    return out;
+  }
+  // Round-up: how much the month's expenses would add if each were rounded up to `to`.
+  function roundupAmount(tx, month, to) {
+    to = Number(to) || 10; var sum = 0;
+    (tx || []).forEach(function (t) { if (t.month !== month || t.type !== 'expense') return; var a = Number(t.amount) || 0; var r = Math.ceil(a / to) * to - a; if (r > 0 && r < to) sum += r; });
+    return round2(sum);
+  }
+  // Progress of one method for month `month`.
+  function methodProgress(m, ctx) {
+    var def = methodByKey(m.key), tx = ctx.tx || [], month = ctx.month, today = ctx.today, p = m.params || {};
+    if (!def) return null;
+    var cf = cashflow(tx, month), saved = Math.max(0, cf.net), out = { key: m.key, name: def.name, target: null, actual: null, pct: null, text: '' };
+    if (def.key === 'ratio' || def.key === 'pyf' || def.key === 'percent' || def.key === 'kakeibo') {
+      var pctWant = def.key === 'kakeibo' ? null : (Number(p.save) || 20) / 100;
+      out.target = def.key === 'kakeibo' ? round2(Number(p.save) || 0) : round2(cf.income * pctWant);
+      out.actual = round2(saved);
+      out.pct = out.target > 0 ? Math.min(1, out.actual / out.target) : (cf.income > 0 ? 0 : null);
+      out.text = cf.income > 0 ? '本月收入 ' + cf.income.toFixed(0) + '，目标存 ' + out.target.toFixed(0) + '，目前结余 ' + out.actual.toFixed(0) : '本月还没有收入记录';
+    } else if (def.key === 'raise') {
+      var base = Number(p.base) || 0, extra = Math.max(0, cf.income - base);
+      out.target = round2(extra); out.actual = round2(Math.min(saved, extra)); out.pct = extra > 0 ? Math.min(1, out.actual / extra) : null;
+      out.text = extra > 0 ? '本月收入比基线多 ' + extra.toFixed(0) + '，这部分应全部存起来' : '本月收入没有超过基线 ' + base.toFixed(0);
+    } else if (def.weeks || def.days || def.cells) {
+      var sch = methodSchedule(m, today), due = sch.filter(function (x) { return x.due; }), dn = sch.filter(function (x) { return x.done; });
+      out.target = round2(sch.reduce(function (a, x) { return a + x.amount; }, 0)); out.actual = round2(dn.reduce(function (a, x) { return a + x.amount; }, 0));
+      out.pct = out.target > 0 ? out.actual / out.target : 0;
+      var overdue = due.filter(function (x) { return !x.done; }).length;
+      out.text = '已存 ' + dn.length + ' / ' + sch.length + (def.cells ? ' 格' : def.weeks ? ' 周' : ' 天') + '，共 ' + out.actual.toFixed(0) + ' / ' + out.target.toFixed(0) + (overdue ? '，有 ' + overdue + ' 期还没打卡' : '');
+      out.overdue = overdue;
+    } else if (def.key === 'roundup') {
+      out.target = roundupAmount(tx, month, p.to); out.actual = (m.collected || {})[month] ? out.target : 0; out.pct = out.target > 0 ? (out.actual ? 1 : 0) : null;
+      out.text = '本月零头合计 ' + out.target.toFixed(2) + ((m.collected || {})[month] ? '，已转存' : '，月底转存到储蓄户口');
+    } else if (def.key === 'nospend') {
+      var days = (m.marks || []).filter(function (d) { return d.slice(0, 7) === month; }).length, weeks = Math.max(1, Math.ceil(Number(today.slice(8)) / 7));
+      out.target = (Number(p.days) || 2) * weeks; out.actual = days; out.pct = Math.min(1, days / out.target);
+      out.text = '本月无消费日 ' + days + ' 天（目标到今天约 ' + out.target + ' 天）';
+    } else if (def.key === 'ladder') {
+      var liquid = ctx.liquid || 0, exp = ctx.avgExpense || 0, steps = [1000, exp, exp * 3, exp * 6].filter(function (x) { return x > 0; });
+      var idx = 0; while (idx < steps.length && liquid >= steps[idx]) idx++;
+      out.target = steps[Math.min(idx, steps.length - 1)] || 1000; out.actual = round2(liquid); out.pct = out.target ? Math.min(1, liquid / out.target) : null;
+      out.text = idx >= steps.length ? '备用金阶梯已全部完成' : '第 ' + (idx + 1) + ' 级：目标 ' + out.target.toFixed(0) + '，现在 ' + liquid.toFixed(0);
+    } else {
+      out.text = def.rule;
+    }
+    return out;
+  }
+  // Did the method help? Savings rate in the months since start vs the 3 months before.
+  function methodComparison(m, tx, month) {
+    var start = (m.startDate || month).slice(0, 7);
+    var after = [], before = [];
+    for (var x = start; x <= month; x = addMonths(x, 1)) { var c = cashflow(tx, x); if (c.income > 0) after.push(c.net / c.income); if (after.length > 24) break; }
+    monthRange(addMonths(start, -1), 3).forEach(function (bm) { var c = cashflow(tx, bm); if (c.income > 0) before.push(c.net / c.income); });
+    var avg = function (a) { return a.length ? a.reduce(function (s, v) { return s + v; }, 0) / a.length : null; };
+    var b = avg(before), a = avg(after);
+    return { before: b, after: a, delta: b != null && a != null ? a - b : null, monthsAfter: after.length, monthsBefore: before.length };
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -2023,7 +2140,8 @@ body.lite .nav [data-tab="ledger"]{display:none}
     memberCategoryMatrix: memberCategoryMatrix, cashflowForecast: cashflowForecast, fiCalc: fiCalc, prepaySim: prepaySim, coverCheck: coverCheck,
     compareShares: compareShares, parseSpeech: parseSpeech, MY_HOUSEHOLD_SHARES: MY_HOUSEHOLD_SHARES,
     parseReceipt: parseReceipt, MERCHANT_RULES: MERCHANT_RULES,
-    RULES_VERSION: RULES_VERSION, EPF_RIA: EPF_RIA, healthDiagnosis: healthDiagnosis, allocatable: allocatable, allocationPlan: allocationPlan, recurringMonthly: recurringMonthly
+    RULES_VERSION: RULES_VERSION, EPF_RIA: EPF_RIA, healthDiagnosis: healthDiagnosis, allocatable: allocatable, allocationPlan: allocationPlan, recurringMonthly: recurringMonthly,
+    SAVING_METHODS: SAVING_METHODS, methodByKey: methodByKey, methodSchedule: methodSchedule, methodProgress: methodProgress, roundupAmount: roundupAmount, methodComparison: methodComparison
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;
@@ -2812,6 +2930,13 @@ function renderActionPlan() {
   } else {
     h += '<div class="task"><b>还没有可分配的钱</b><p>' + esc(plan.note || '先补上收入与固定支出的定期项目，系统才能算出每月能安排多少。') + '</p><div class="acts" style="justify-content:flex-start;margin:0"><button class="btn small" data-act="new-rec">添加定期收入/支出</button></div></div>';
   }
+  var methods = methodsDoc();
+  if (methods.length) {
+    var mctx = methodCtx();
+    h += '<div class="task"><div class="lbl">我的存钱法</div>' + methods.map(function (mm) { var p = L.methodProgress(mm, mctx) || {}; return '<div style="font-size:13px;margin:4px 0"><b>' + esc(p.name || mm.key) + '</b> <span class="muted">' + esc(p.text || '') + '</span></div>'; }).join('') + '<div class="acts" style="justify-content:flex-start;margin:4px 0 0"><button class="btn small" data-tab="plan">去打卡 ›</button></div></div>';
+  } else {
+    h += '<div class="task"><div class="lbl">还没有选存钱法</div><div class="acts" style="justify-content:flex-start;margin:4px 0 0"><button class="btn small" id="homePickMethod">选一种存钱法 ›</button></div></div>';
+  }
   if (tasks.length) {
     h += '<div class="lbl" style="margin-top:10px">本月财务进展 · ' + done.length + ' 项已完成，' + open.length + ' 项待处理</div>';
     h += '<div class="bar-track"><div class="bar-fill" style="width:' + (tasks.length ? done.length / tasks.length * 100 : 0).toFixed(0) + '%"></div></div>';
@@ -2845,10 +2970,115 @@ document.addEventListener('click', function (e) {
   var b = e.target.closest('[data-task]');
   if (b) return taskAction(b.dataset.id, b.dataset.task);
   if (e.target.closest('#healthOpen')) return openHealth();
+  if (e.target.id === 'homePickMethod') return openMethodCatalog();
 });
 $('hsSave').addEventListener('click', function () {
   var body = Object.assign({}, prefs(), { birthYear: Number($('hsBirth').value) || null, lifeCover: Number($('hsCover').value) || 0 });
   S.db.collection('settings').doc('prefs').set(body).then(function () { closeSheets(); toast('已保存'); }).catch(function (x) { toast(errText(x)); });
+});
+
+// ---------- saving methods ----------
+function methodsDoc() { return (S.settings.savingMethods && S.settings.savingMethods.methods) || []; }
+function saveMethods(list) { return S.db.collection('settings').doc('savingMethods').set({ methods: list, updatedAt: new Date().toISOString() }); }
+function methodCtx() {
+  var diag = diagNow();
+  return { tx: txArr(), month: S.month, today: L.todayKuching(), liquid: diag.liquid, avgExpense: diag.expense };
+}
+function renderMethods() {
+  var list = methodsDoc(), ctx = methodCtx();
+  $('methodList').innerHTML = list.length ? '<ul class="list">' + list.map(function (m, i) {
+    var p = L.methodProgress(m, ctx) || {}, def = L.methodByKey(m.key) || {};
+    var cmp = L.methodComparison(m, ctx.tx, S.month);
+    var cmpTxt = cmp.delta != null && cmp.monthsAfter >= 1 && cmp.monthsBefore >= 1 ? ' · 储蓄率 ' + (cmp.before * 100).toFixed(0) + '% → ' + (cmp.after * 100).toFixed(0) + '%' : '';
+    return '<li class="li" style="display:block"><button class="row" data-method="' + i + '" style="padding:0;width:100%"><span class="n"><b>' + esc(def.name || m.key) + '</b><small>' + esc((p.text || def.rule || '') + cmpTxt) + '</small></span><span class="v"><b>' + (p.pct == null ? '—' : (p.pct * 100).toFixed(0) + '%') + '</b></span></button>' +
+      (p.pct != null ? '<div class="bar-track"><div class="bar-fill ' + (p.overdue ? 'warn' : '') + '" style="width:' + (p.pct * 100).toFixed(0) + '%"></div></div>' : '') + '</li>';
+  }).join('') + '</ul>' : '<div class="empty">还没有选存钱法。先选一种，首页会每月提醒你要存多少、打卡进度。</div>';
+}
+function openMethodCatalog() {
+  var groups = {};
+  L.SAVING_METHODS.forEach(function (m) { (groups[m.group] = groups[m.group] || []).push(m); });
+  var active = methodsDoc().map(function (m) { return m.key; });
+  $('methodCatalog').innerHTML = Object.keys(groups).map(function (g) {
+    return '<h3>' + esc(g) + '</h3>' + groups[g].map(function (m) {
+      return '<div class="mcat" data-pick="' + m.key + '"><b>' + esc(m.name) + (active.indexOf(m.key) >= 0 ? ' <span class="tag">使用中</span>' : '') + '</b><span class="who">适合：' + esc(m.who) + '</span><small>' + esc(m.rule) + '</small></div>';
+    }).join('');
+  }).join('');
+  $('methodSheet').hidden = false;
+}
+var msCurrent = null;
+function openMethodSetup(key, idx) {
+  var def = L.methodByKey(key); if (!def) return;
+  var existing = idx != null ? methodsDoc()[idx] : null;
+  msCurrent = { key: key, idx: idx != null ? idx : null };
+  $('msTitle').textContent = def.name; $('msRule').textContent = def.rule + ' · 适合：' + def.who;
+  var params = (existing && existing.params) || {};
+  $('msFields').innerHTML = def.params.map(function (p) { return '<label>' + esc(p[1]) + '<input data-param="' + p[0] + '" type="text" inputmode="decimal" value="' + esc(params[p[0]] != null ? params[p[0]] : p[2]) + '"></label>'; }).join('') +
+    (def.weeks || def.days ? '<label>开始日期<input id="msStart" type="date" value="' + esc((existing && existing.startDate) || L.todayKuching()) + '"></label>' : '');
+  $('msRemove').hidden = !existing; $('msSave').textContent = existing ? '保存' : '开始';
+  var detail = '';
+  if (existing) {
+    var ctx = methodCtx(), p = L.methodProgress(existing, ctx);
+    if (def.weeks || def.days || def.cells) {
+      var sch = L.methodSchedule(existing, ctx.today), show = def.days ? sch.filter(function (x) { return x.date && x.date.slice(0, 7) === S.month; }) : sch;
+      detail = '<h3>' + (def.days ? S.month + ' 打卡' : '打卡格子，点一下表示已存') + '</h3><div class="grid52 ' + (def.cells ? 'g10' : '') + '">' + show.map(function (x) {
+        return '<button type="button" data-cell="' + x.idx + '" class="' + (x.done ? 'done' : x.due ? 'due' : '') + '" title="' + esc(x.date || '') + '">' + (def.days ? Number(x.date.slice(8)) : x.idx) + (def.days ? '' : '<br>' + x.amount) + '</button>';
+      }).join('') + '</div><div class="muted">' + esc(p.text) + '</div>';
+    } else if (def.key === 'roundup') {
+      detail = '<div class="muted" style="margin-top:10px">' + esc(p.text) + '</div>' + (p.target > 0 && !p.actual ? '<div class="acts" style="justify-content:flex-start"><button class="btn small primary" id="msRoundupDone">已转存本月零头 ' + rm(p.target) + '</button></div>' : '');
+    } else if (def.key === 'nospend') {
+      var marks = existing.marks || [], days = L.calendarGrid(S.month);
+      detail = '<h3>' + S.month + ' 无消费日（点日期打卡）</h3><div class="grid52" style="grid-template-columns:repeat(7,1fr)">' + days.flat().map(function (d) { return d ? '<button type="button" data-mark="' + d + '" class="' + (marks.indexOf(d) >= 0 ? 'done' : '') + '">' + Number(d.slice(8)) + '</button>' : '<span></span>'; }).join('') + '</div><div class="muted">' + esc(p.text) + '</div>';
+    } else if (def.key === 'kakeibo') {
+      var k = (existing.kakeibo || {})[S.month] || {};
+      detail = '<h3>' + S.month + ' 月末四问</h3><div class="fields"><label>有多少钱？<input data-kk="have" type="text" value="' + esc(k.have || '') + '"></label><label>想存多少？<input data-kk="want" type="text" value="' + esc(k.want || '') + '"></label><label class="full">花了多少、花在哪？<input data-kk="spent" type="text" value="' + esc(k.spent || '') + '"></label><label class="full">下个月怎么改进？<input data-kk="improve" type="text" value="' + esc(k.improve || '') + '"></label></div>';
+    } else {
+      detail = '<div class="muted" style="margin-top:10px">' + esc(p.text) + '</div>';
+      if (def.key === 'envelope') detail += '<div class="acts" style="justify-content:flex-start"><button class="btn small" data-act="new-cat">去设分类预算</button></div>';
+      if (def.key === 'sinking') detail += '<div class="acts" style="justify-content:flex-start"><button class="btn small" data-act="new-rec">去添加年缴项目</button></div>';
+    }
+  }
+  $('msDetail').innerHTML = detail;
+  $('methodSetup').hidden = false;
+}
+async function saveMethodSetup(remove) {
+  var list = methodsDoc().slice(), def = L.methodByKey(msCurrent.key);
+  if (remove) { if (msCurrent.idx != null) list.splice(msCurrent.idx, 1); }
+  else {
+    var params = {}; $('msFields').querySelectorAll('[data-param]').forEach(function (i) { params[i.dataset.param] = L.evalAmount(i.value); });
+    var m = msCurrent.idx != null ? Object.assign({}, list[msCurrent.idx]) : { key: msCurrent.key, startDate: L.todayKuching(), done: [] };
+    m.params = params;
+    if ($('msStart')) m.startDate = $('msStart').value || m.startDate;
+    var kk = {}; var any = false; $('msDetail').querySelectorAll('[data-kk]').forEach(function (i) { kk[i.dataset.kk] = i.value.trim(); if (i.value.trim()) any = true; });
+    if (any) { m.kakeibo = Object.assign({}, m.kakeibo || {}); m.kakeibo[S.month] = kk; }
+    if (msCurrent.idx != null) list[msCurrent.idx] = m; else list.push(m);
+  }
+  try { await saveMethods(list); audit(remove ? '停用存钱法' : '存钱法', msCurrent.key, def ? def.name : ''); track(remove ? 'method_off' : 'method_on'); closeSheets(); toast(remove ? '已停用' : '已开始'); }
+  catch (e) { toast(errText(e)); }
+}
+async function toggleCell(idx) {
+  var list = methodsDoc().slice(), m = Object.assign({}, list[msCurrent.idx]); var done = (m.done || []).slice();
+  var at = done.indexOf(idx); if (at >= 0) done.splice(at, 1); else done.push(idx);
+  m.done = done; list[msCurrent.idx] = m;
+  try { await saveMethods(list); track('method_tick'); openMethodSetup(m.key, msCurrent.idx); } catch (e) { toast(errText(e)); }
+}
+async function toggleMark(day) {
+  var list = methodsDoc().slice(), m = Object.assign({}, list[msCurrent.idx]); var marks = (m.marks || []).slice();
+  var at = marks.indexOf(day); if (at >= 0) marks.splice(at, 1); else marks.push(day);
+  m.marks = marks; list[msCurrent.idx] = m;
+  try { await saveMethods(list); openMethodSetup(m.key, msCurrent.idx); } catch (e) { toast(errText(e)); }
+}
+$('pickMethodBtn').addEventListener('click', openMethodCatalog);
+$('methodCatalog').addEventListener('click', function (e) { var c = e.target.closest('[data-pick]'); if (!c) return; var key = c.dataset.pick, idx = methodsDoc().findIndex(function (m) { return m.key === key; }); $('methodSheet').hidden = true; openMethodSetup(key, idx >= 0 ? idx : null); });
+$('methodList').addEventListener('click', function (e) { var b = e.target.closest('[data-method]'); if (!b) return; var m = methodsDoc()[Number(b.dataset.method)]; if (m) openMethodSetup(m.key, Number(b.dataset.method)); });
+$('msSave').addEventListener('click', function () { saveMethodSetup(false); });
+$('msRemove').addEventListener('click', function () { saveMethodSetup(true); });
+$('msDetail').addEventListener('click', function (e) {
+  var c = e.target.closest('[data-cell]'); if (c) return toggleCell(Number(c.dataset.cell));
+  var mk = e.target.closest('[data-mark]'); if (mk) return toggleMark(mk.dataset.mark);
+  if (e.target.id === 'msRoundupDone') {
+    var list = methodsDoc().slice(), m = Object.assign({}, list[msCurrent.idx]); m.collected = Object.assign({}, m.collected || {}); m.collected[S.month] = true; list[msCurrent.idx] = m;
+    saveMethods(list).then(function () { toast('已记录'); openMethodSetup(m.key, msCurrent.idx); });
+  }
 });
 
 // ---------- charts (inline SVG, no library) ----------
@@ -3480,6 +3710,7 @@ function renderPlan() {
       (budget > 0 ? '<div class="bar-track"><div class="bar-fill ' + (over ? 'over' : pct > 80 ? 'warn' : '') + '" style="width:' + Math.min(100, pct).toFixed(1) + '%"></div></div>' : '') + '</li>';
   }).join('') || '<li class="empty">还没有支出分类</li>';
 
+  renderMethods();
   var pend = L.recurringForMonth(recArr(), txs, m);
   $('pendingRec').innerHTML = pend.filter(function (x) { return !x.done; }).map(function (x) {
     var r = x.rec;

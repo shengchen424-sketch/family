@@ -640,4 +640,45 @@ t('allocation plan: healthy family gets long-term + free money only', () => {
   assert.strictEqual(plan.tasks[0].amount, 900);
 });
 
+// 19. Saving methods
+t('saving methods catalog covers ratio, challenge, structure and goal methods', () => {
+  const groups = new Set(L.SAVING_METHODS.map(m => m.group));
+  ['比例法', '挑战', '结构法', '目标法'].forEach(g => assert.ok(groups.has(g), g));
+  assert.ok(L.SAVING_METHODS.length >= 15);
+  assert.ok(L.SAVING_METHODS.every(m => m.name && m.who && m.rule));
+});
+t('52-week schedule: amounts, dates, due and done flags; reverse variant', () => {
+  const m = { key: 'c52', params: { unit: 10 }, startDate: '2026-10-05', done: [1, 2] };
+  const s = L.methodSchedule(m, '2026-10-20');
+  assert.strictEqual(s.length, 52); assert.strictEqual(s[0].amount, 10); assert.strictEqual(s[51].amount, 520);
+  assert.strictEqual(s[1].date, '2026-10-12'); assert.strictEqual(s[2].due, true); assert.strictEqual(s[3].due, false);
+  assert.strictEqual(s.reduce((a, x) => a + x.amount, 0), 13780);
+  const p = L.methodProgress(m, { tx: [], month: '2026-10', today: '2026-10-20' });
+  assert.strictEqual(p.actual, 30); assert.strictEqual(p.overdue, 1);
+  assert.strictEqual(L.methodSchedule({ key: 'c52r', params: { unit: 1 }, startDate: '2026-01-01' }, '2026-01-01')[0].amount, 52);
+  assert.strictEqual(L.methodSchedule({ key: 'grid100', params: { unit: 2 } }, '2026-01-01').reduce((a, x) => a + x.amount, 0), 10100);
+});
+t('ratio / pay-yourself-first progress from the month cash flow', () => {
+  const txs = [{ type: 'income', month: M, amount: 8000 }, { type: 'expense', month: M, amount: 6000 }];
+  const p = L.methodProgress({ key: 'pyf', params: { save: 20 } }, { tx: txs, month: M, today: M + '-16' });
+  assert.strictEqual(p.target, 1600); assert.strictEqual(p.actual, 2000); assert.strictEqual(p.pct, 1);
+  const r = L.methodProgress({ key: 'raise', params: { base: 7000 } }, { tx: txs, month: M, today: M + '-16' });
+  assert.strictEqual(r.target, 1000);
+});
+t('round-up, no-spend days and emergency ladder', () => {
+  const txs = [{ type: 'expense', month: M, amount: 12.4 }, { type: 'expense', month: M, amount: 30 }, { type: 'expense', month: M, amount: 7.25 }];
+  assert.strictEqual(L.roundupAmount(txs, M, 10), 10.35);
+  const ns = L.methodProgress({ key: 'nospend', params: { days: 2 }, marks: [M + '-03', M + '-05', '2026-09-01'] }, { tx: [], month: M, today: M + '-14' });
+  assert.strictEqual(ns.actual, 2); assert.strictEqual(ns.target, 4);
+  const ld = L.methodProgress({ key: 'ladder' }, { tx: [], month: M, today: M + '-14', liquid: 2500, avgExpense: 4000 });
+  assert.strictEqual(ld.target, 4000); assert.ok(/第 2 级/.test(ld.text));
+});
+t('before/after comparison of savings rate', () => {
+  const txs = [];
+  ['2026-06', '2026-07', '2026-08'].forEach(x => { txs.push({ type: 'income', month: x, amount: 5000 }); txs.push({ type: 'expense', month: x, amount: 4500 }); });
+  ['2026-09', M].forEach(x => { txs.push({ type: 'income', month: x, amount: 5000 }); txs.push({ type: 'expense', month: x, amount: 3500 }); });
+  const c = L.methodComparison({ key: 'pyf', startDate: '2026-09-01' }, txs, M);
+  assert.ok(Math.abs(c.before - 0.1) < 1e-9); assert.ok(Math.abs(c.after - 0.3) < 1e-9); assert.ok(Math.abs(c.delta - 0.2) < 1e-9);
+});
+
 console.log('\n' + passed + ' tests passed');
