@@ -6,9 +6,9 @@ After=network.target
 
 [Service]
 WorkingDirectory=/root/family
-Environment=PORT=8443
-Environment=TLS_CERT=/root/family/cert.pem
-Environment=TLS_KEY=/root/family/key.pem
+Environment=PORT=8444
+Environment=TLS_CERT=/etc/letsencrypt/live/chen-family424.duckdns.org/fullchain.pem
+Environment=TLS_KEY=/etc/letsencrypt/live/chen-family424.duckdns.org/privkey.pem
 Environment=DATA_DIR=/root/family/data
 ExecStart=/usr/bin/node /root/family/server.js
 Restart=always

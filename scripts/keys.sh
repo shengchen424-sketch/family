@@ -24,7 +24,8 @@ case "$cmd" in
     k="$(newkey)"
     grep -v ":$name\(:.*\)\?\$" "$KEYS_FILE" > "$KEYS_FILE.tmp" || true; echo "$k:$name${fam:+:$fam}" >> "$KEYS_FILE.tmp"; mv "$KEYS_FILE.tmp" "$KEYS_FILE"; chmod 600 "$KEYS_FILE"
     restart
-    echo "$name 的新密钥（只显示这一次，请马上发给本人）："; echo; echo "  https://$(hostname -I | awk '{print $1}'):8444/?k=$k"; echo ;;
+    host="$(cat data/domain.txt 2>/dev/null || hostname -I | awk '{print $1}')"
+    echo "$name 的新密钥（只显示这一次，请马上发给本人）："; echo; echo "  https://$host:8444/?k=$k"; echo ;;
   remove)
     [ -n "$name" ] || { echo "用法：keys.sh remove 名字"; exit 1; }
     grep -v ":$name\(:.*\)\?\$" "$KEYS_FILE" > "$KEYS_FILE.tmp" || true; mv "$KEYS_FILE.tmp" "$KEYS_FILE"; chmod 600 "$KEYS_FILE"

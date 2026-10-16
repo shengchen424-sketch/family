@@ -76,3 +76,9 @@ bash scripts/keys.sh remove-temp   # 删除 systemd 单元里的临时密钥 Che
 - 方案：没有设置就是完整版（自家用永远不限）。设为 `free` 后：最多 8 个账户、不能上传收据照片；到期日过了自动降为免费版。页面设置里显示当前方案。
 - 付费订阅的接法：Android 版接 Google Play Billing，购买成功后由后端验证收据并调用 `setPlan(家庭, 'pro', 到期日)`；续费同样更新到期日。这一步要等 Android 打包（需要域名）之后做。
 - 新家庭开通：`bash scripts/keys.sh add "名字" 家庭编号`，把生成的链接发给对方即可；对方第一次打开会进入新手引导。
+
+## 域名与证书（2026-10-16 起）
+
+- 域名 `chen-family424.duckdns.org`（DuckDNS 免费）指向 187.77.128.30；`data/domain.txt` 记录域名，`keys.sh` 生成链接时会用它。
+- 证书：Let's Encrypt，`certbot certonly --webroot -w /var/www/html -d chen-family424.duckdns.org`（80 端口由现有 nginx 提供验证目录）。证书在 `/etc/letsencrypt/live/chen-family424.duckdns.org/`，systemd 单元的 TLS_CERT / TLS_KEY 指向它；`/etc/letsencrypt/renewal-hooks/deploy/family-assets.sh` 在续期后自动重启服务。certbot 的 systemd timer 每天检查续期。
+- 端口仍是 8444（443 被 sshd 占用）。访问地址：`https://chen-family424.duckdns.org:8444/`。
