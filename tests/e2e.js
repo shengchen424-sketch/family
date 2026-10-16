@@ -44,6 +44,9 @@ function samplePdf() {
   ok('login screen', !(await page.$eval('#login', n => n.hidden)));
   await page.fill('#loginKey', 'testkey123'); await page.click('#loginBtn'); await page.waitForTimeout(1200);
   ok('logged in, key stripped from url', page.url().endsWith('/') && await page.$eval('#notice', n => n.hidden));
+  await page.waitForTimeout(1800);
+  ok('setup wizard opens on first run', !(await page.$eval('#wizSheet', n => n.hidden)));
+  await page.click('#wzClose'); await page.waitForTimeout(300);
   await page.click('#welcome [data-act="goto"]'); await page.waitForTimeout(300);
   await page.click('#seedBtn'); await page.waitForTimeout(200); await page.click('#seedBtn'); await page.waitForTimeout(3000);
   ok('seeded 25 accounts', Object.keys(json('accounts.json')).length === 25);

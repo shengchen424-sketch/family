@@ -471,4 +471,41 @@ t('health check flags dangling references, stale balances and duplicates', () =>
   assert.deepStrictEqual(L.healthCheck({ accounts: {}, tx: [] }).map(x => x.level), ['ok']);
 });
 
+// 15. First-run setup builder
+t('setup builder: accounts, balances, loans, incomes, prefs from wizard answers', () => {
+  const b = L.buildSetup({
+    month: M, today: M + '-16', members: ['阿明', 'Siti'], budget: '3,500',
+    items: {
+      cash: [{ name: 'Maybank', amount: '1,200.50' }, { name: '', amount: '' }],
+      ewallet: [{ name: 'TNG', amount: '50' }],
+      mortgage: [{ name: '房贷', amount: '300000', rate: '4.1', pay: '1500' }],
+      bizcash: [{ name: '生意户口', amount: '9000', currency: 'SGD' }],
+      card: [{ name: 'Visa', amount: 'abc' }]
+    },
+    incomes: [{ name: '工资', amount: '6000', day: 28, accountIdx: 0, auto: true }]
+  });
+  const accs = Object.values(b.accounts);
+  assert.strictEqual(accs.length, 4);
+  const loan = accs.find(a => a.category === '房贷');
+  assert.strictEqual(loan.kind, 'liability'); assert.strictEqual(loan.rate, 4.1); assert.strictEqual(loan.monthlyPayment, 1500);
+  assert.strictEqual(accs.find(a => a.category === '企业现金').group, 'business');
+  assert.strictEqual(accs.find(a => a.category === '企业现金').currency, 'SGD');
+  assert.strictEqual(Object.values(b.balances).find(x => x.amount === 1200.5).month, M);
+  assert.deepStrictEqual(Object.keys(b.members), ['阿明', 'Siti']);
+  assert.ok(b.errors.some(e => /Visa/.test(e)));
+  const inc = Object.values(b.recurring)[0];
+  assert.strictEqual(inc.type, 'income'); assert.strictEqual(inc.dayOfMonth, 28); assert.strictEqual(inc.autoPost, true);
+  assert.strictEqual(b.accounts[inc.account].name, 'Maybank');
+  assert.strictEqual(b.settings.prefs.monthlyBudget, 3500);
+  assert.strictEqual(b.settings.onboarding.done, true);
+  const t = L.familyTotals(Object.fromEntries(Object.entries(b.accounts).map(([id, a]) => [id, Object.assign({ id }, a)])), b.balances, {}, M);
+  assert.strictEqual(t.liquid, 1250.5, 'e-wallets count as liquid cash');
+  assert.strictEqual(t.liabs, 300000);
+});
+t('setup types cover the common asset and liability classes', () => {
+  const cats = new Set(L.SETUP_TYPES.map(x => x.category));
+  ['现金与定存', '电子钱包', '退休金', '投资', '保险', '房产', '车辆', '房贷', '车贷', '个人贷款', '信用卡', '学贷', '企业现金', '企业透支'].forEach(c => assert.ok(cats.has(c), c));
+  assert.ok(L.SETUP_TYPES.every(x => x.hint && x.label && x.ph));
+});
+
 console.log('\n' + passed + ' tests passed');

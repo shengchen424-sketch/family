@@ -6,6 +6,7 @@
   'use strict';
 
   var DEFAULT_RATE = 3.1953;
+  var LIQUID = ['现金与定存', '电子钱包'];
   var TX_TYPES = ['income', 'expense', 'transfer', 'repayment'];
 
   // ---------- dates ----------
@@ -106,7 +107,7 @@
         t.assets += r.rm;
         var c = r.acc.category || '其他';
         t.byCategory[c] = (t.byCategory[c] || 0) + r.rm;
-        if (c === '现金与定存') t.liquid += r.rm;
+        if (LIQUID.indexOf(c) >= 0) t.liquid += r.rm;
       } else {
         t.liabs += r.rm;
       }
@@ -583,7 +584,7 @@
   // ---------- estimates, budgets, goals, insights ----------
   // Cash/deposit account: last recorded balance plus the recorded flows after its asOf date (RM accounts only).
   function cashEstimate(acc, balances, tx, m) {
-    if (!acc || acc.currency !== 'MYR' || acc.kind !== 'asset') return null;
+    if (!acc || acc.currency !== 'MYR' || acc.kind !== 'asset' || LIQUID.indexOf(acc.category) < 0) return null;
     var v = latestBalance(balances, acc.id, m);
     if (!v) return null;
     var asOf = asOfOf(v), delta = 0, n = 0;
@@ -782,6 +783,74 @@
     return out;
   }
 
+  // ---------- first-run setup (onboarding) ----------
+  // Every kind of asset / liability a Malaysian or Singaporean family is likely to hold, with how to value it.
+  var SETUP_TYPES = [
+    { key: 'cash', kind: 'asset', group: 'family', category: '现金与定存', label: '现金与银行户口', hint: '手上现金、储蓄/往来户口按银行 App 显示的当前余额填；定存填本金。', ph: 'Maybank 储蓄、Public Bank 定存、手上现金' },
+    { key: 'ewallet', kind: 'asset', group: 'family', category: '电子钱包', label: '电子钱包', hint: 'TNG eWallet、GrabPay、Boost、ShopeePay 等的余额。', ph: 'TNG eWallet' },
+    { key: 'epf', kind: 'asset', group: 'family', category: '退休金', label: '退休金', hint: 'EPF/KWSP 看 i-Akaun 的总额（第一、二户口加起来），PRS、新加坡 CPF 同理。每人一条。', ph: 'EPF Chen、EPF Liza' },
+    { key: 'invest', kind: 'asset', group: 'family', category: '投资', label: '股票、基金与投资账户', hint: '券商账户（MooMoo、Rakuten、M+）按当前市值；ASNB、Tabung Haji、单位信托按 App 余额；机器人投顾（StashAway、Mytheo）按当前价值。', ph: 'MooMoo、ASNB、StashAway' },
+    { key: 'crypto', kind: 'asset', group: 'family', category: '投资', label: '加密货币', hint: 'Luno、Binance 等按现在的市值（App 首页显示的总额）。', ph: 'Luno' },
+    { key: 'gold', kind: 'asset', group: 'family', category: '投资', label: '黄金白银', hint: '实物按当前金价 × 克数；黄金户口（Maybank Gold、HelloGold）按 App 余额。', ph: '金条、黄金户口' },
+    { key: 'insurance', kind: 'asset', group: 'family', category: '保险', label: '保险现金价值', hint: '只填有现金价值的保单（储蓄险、投资连结险），看年度保单报表上的 cash value / surrender value。纯医药卡和定期寿险没有现金价值，不用填。', ph: 'Chen A-LifeLink、Liza 储蓄险' },
+    { key: 'property', kind: 'asset', group: 'family', category: '房产', label: '房产', hint: '自住或出租的房子按市值：参考附近同类型最近成交价、银行估值或 PropertyGuru/iProperty 挂牌价打九折。房贷另外填在负债。', ph: 'Uni Garden 自住' },
+    { key: 'vehicle', kind: 'asset', group: 'family', category: '车辆', label: '车辆', hint: '车、摩托按二手行情：到 mudah.my、carlist.my 找同款同年份的挂牌价取中间值。车贷另外填在负债。', ph: 'Mazda CX-5 2018' },
+    { key: 'lend', kind: 'asset', group: 'family', category: '其他资产', label: '借给别人的钱', hint: '预计真的能收回的金额，收不回的就不要算。', ph: '借给弟弟' },
+    { key: 'bizcash', kind: 'asset', group: 'business', category: '企业现金', label: '生意的户口', hint: '公司或个体生意的银行户口。单独显示，不计入家庭净资产；从生意提款到家里时记一笔"农场提款"收入。', ph: 'Agrijoy PBB' },
+    { key: 'mortgage', kind: 'liability', group: 'family', category: '房贷', label: '房贷', hint: '填银行 App 显示的 outstanding balance（剩余本金）。顺便填月供和年利率，以后记还款会自动算利息。', ph: 'Uni Garden 房贷', loan: true },
+    { key: 'carloan', kind: 'liability', group: 'family', category: '车贷', label: '车贷', hint: 'Hire purchase 看 statement 上的 balance；不确定的话用 剩余期数 × 月供 粗估。', ph: 'Hilux 贷款', loan: true },
+    { key: 'personal', kind: 'liability', group: 'family', category: '个人贷款', label: '个人贷款', hint: '银行或合作社贷款的剩余本金。', ph: 'Personal loan', loan: true },
+    { key: 'card', kind: 'liability', group: 'family', category: '信用卡', label: '信用卡欠款', hint: '当前账单还没还的金额。每月全额还清的可以填 0。', ph: 'Maybank Visa' },
+    { key: 'study', kind: 'liability', group: 'family', category: '学贷', label: '学贷', hint: 'PTPTN 等的剩余欠款，看 App 或年度 statement。', ph: 'PTPTN', loan: true },
+    { key: 'bnpl', kind: 'liability', group: 'family', category: '其他负债', label: '先买后付 / 分期', hint: 'Atome、SPayLater、手机分期等剩下还没付的总额。', ph: 'Atome' },
+    { key: 'borrow', kind: 'liability', group: 'family', category: '其他负债', label: '向别人借的钱', hint: '欠亲友的钱，按还没还的金额。', ph: '欠爸妈' },
+    { key: 'bizdebt', kind: 'liability', group: 'business', category: '企业透支', label: '生意的透支或贷款', hint: '生意户口的 overdraft 或商业贷款余额，单独计算。', ph: 'Agrijoy UOB 透支' }
+  ];
+  var SETUP_CATEGORIES = [
+    ['饮食', 'expense'], ['日用', 'expense'], ['交通与油费', 'expense'], ['孩子', 'expense'], ['水电网', 'expense'], ['房屋', 'expense'],
+    ['车辆', 'expense'], ['保险', 'expense'], ['医疗', 'expense'], ['娱乐', 'expense'], ['人情', 'expense'], ['其他支出', 'expense'],
+    ['工资', 'income'], ['生意提款', 'income'], ['投资收益', 'income'], ['其他收入', 'income']
+  ];
+  // Turns the wizard answers into documents. answers = { members:[names], items:{typeKey:[{name,amount,currency,rate,pay}]},
+  // incomes:[{name,amount,day,accountIdx}], budget, month, today }. Returns { accounts:{id:doc}, balances:{id:doc}, members:{}, ... }.
+  function buildSetup(answers) {
+    var m = answers.month, today = answers.today || (m + '-01'), out = { accounts: {}, balances: {}, members: {}, categories: {}, recurring: {}, settings: {}, errors: [] };
+    var sort = 0, cashIds = [];
+    (answers.members || []).map(function (x) { return String(x || '').trim(); }).filter(Boolean).forEach(function (name, i) {
+      var id = name.replace(/[^\w一-龥-]/g, '') || ('m' + (i + 1));
+      out.members[id] = { name: name, sort: i + 1 };
+    });
+    SETUP_TYPES.forEach(function (tp) {
+      ((answers.items || {})[tp.key] || []).forEach(function (row) {
+        var name = String(row.name || '').trim(), amt = evalAmount(row.amount);
+        if (!name && !isFinite(amt)) return;
+        if (!name) { out.errors.push(tp.label + '：有一行没有名称'); return; }
+        if (!isFinite(amt) || amt < 0) { out.errors.push(tp.label + '「' + name + '」的金额不正确'); return; }
+        var id = 'a-' + tp.key + '-' + (++sort) + '-' + Math.random().toString(36).slice(2, 6);
+        var acc = { name: name, kind: tp.kind, group: tp.group, category: tp.category, currency: row.currency === 'SGD' ? 'SGD' : 'MYR', sort: sort, active: true };
+        if (tp.loan) {
+          var r = Number(row.rate), p = evalAmount(row.pay);
+          if (r > 0) acc.rate = r;
+          if (p > 0) acc.monthlyPayment = p;
+        }
+        out.accounts[id] = acc;
+        out.balances[m + '__' + id] = { month: m, asOf: today, accountId: id, amount: round2(amt), currency: acc.currency, note: '新手设置' };
+        if (tp.key === 'cash' || tp.key === 'ewallet') cashIds.push(id);
+      });
+    });
+    SETUP_CATEGORIES.forEach(function (c, i) { out.categories['c-' + (i + 1)] = { name: c[0], type: c[1], budget: 0, sort: i + 1 }; });
+    (answers.incomes || []).forEach(function (inc, i) {
+      var name = String(inc.name || '').trim(), amt = evalAmount(inc.amount);
+      if (!name || !(amt > 0)) return;
+      out.recurring['r-income-' + (i + 1)] = { name: name, type: 'income', amount: round2(amt), dayOfMonth: Math.min(31, Math.max(1, Number(inc.day) || 1)),
+        category: '工资', account: cashIds[Number(inc.accountIdx) || 0] || cashIds[0] || null, member: 'shared', startMonth: m, endMonth: null, active: true, autoPost: !!inc.auto, skipped: [] };
+    });
+    var budget = evalAmount(answers.budget);
+    out.settings.prefs = { monthlyBudget: budget > 0 ? budget : 0, emergencyMonths: 6 };
+    out.settings.onboarding = { done: true, at: today };
+    return out;
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -806,7 +875,7 @@
     cashEstimate: cashEstimate, budgetSummary: budgetSummary, goalProgress: goalProgress, insights: insights, findSimilar: findSimilar,
     evalAmount: evalAmount, amortization: amortization,
     dayTotals: dayTotals, calendarGrid: calendarGrid, weekSummary: weekSummary, dueAutoPost: dueAutoPost,
-    healthCheck: healthCheck
+    healthCheck: healthCheck, SETUP_TYPES: SETUP_TYPES, SETUP_CATEGORIES: SETUP_CATEGORIES, buildSetup: buildSetup, LIQUID: LIQUID
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;

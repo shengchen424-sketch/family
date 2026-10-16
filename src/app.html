@@ -196,6 +196,26 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .welcome{background:var(--surface);border:1px solid var(--accent);border-radius:12px;padding:16px;margin-bottom:12px}
 .welcome ol{margin:8px 0 0;padding-left:20px}
 .welcome li{margin:4px 0}
+.wiz .steps{display:flex;gap:4px;margin:0 0 12px}
+.wiz .steps i{flex:1;height:4px;border-radius:2px;background:var(--surface2)}
+.wiz .steps i.on{background:var(--accent)}
+.wiz .q{font-size:15px;font-weight:600;margin:0 0 6px}
+.wiz .hint{background:var(--surface2);border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--muted);margin:0 0 10px}
+.wiz .tgrid{display:grid;grid-template-columns:1fr;gap:6px}
+@media (min-width:600px){.wiz .tgrid{grid-template-columns:1fr 1fr}}
+.wiz .tgrid label{flex-direction:row;align-items:flex-start;gap:8px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--ink);font-size:13px;cursor:pointer}
+.wiz .tgrid label input{margin-top:3px}
+.wiz .tgrid label.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface))}
+.wiz .tgrid small{display:block;color:var(--muted);font-size:11.5px}
+.wiz .rowi{border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px;display:grid;gap:6px;grid-template-columns:1fr 1fr}
+.wiz .rowi .full{grid-column:1/-1}
+.wiz .rowi label{font-size:11.5px}
+.wiz .sum{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+.wiz .sum div{background:var(--surface2);border-radius:8px;padding:8px 10px}
+.wiz .sum b{display:block;font-size:15px}
+.wiz .chipsx{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.wiz .chipsx span{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:13px;display:inline-flex;gap:6px;align-items:center}
+.wiz .chipsx button{border:0;background:none;color:var(--neg);cursor:pointer;font:inherit;padding:0}
 </style>
 
 <main class="wrap">
@@ -236,7 +256,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       <h2>欢迎，先把账本建起来</h2>
       <div class="muted">三步开始：</div>
       <ol>
-        <li><button class="btn small" data-act="goto" data-id="settings">导入 2026-10 期初数据</button> 或 <button class="btn small" data-act="new-acc">手动添加账户</button></li>
+        <li><button class="btn small primary" id="welcomeWiz">开始新手引导（推荐）</button> 或 <button class="btn small" data-act="goto" data-id="settings">导入期初数据</button></li>
         <li>每月在「余额」更新各账户余额（可批量）</li>
         <li>平时用底部 ＋ 记每一笔开销，月底看报表</li>
       </ol>
@@ -453,6 +473,12 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     </div>
 
     <div class="panel">
+      <h2>新手引导</h2>
+      <p class="muted">一步步问你有哪些资产和负债、怎么估值，然后自动建好账户。已有账户时也可以再跑一次补充新账户。</p>
+      <div class="acts" style="justify-content:flex-start"><button class="btn" id="wizOpenBtn">打开新手引导</button></div>
+    </div>
+
+    <div class="panel">
       <h2>数据体检</h2>
       <div class="ins" id="healthList"></div>
     </div>
@@ -630,6 +656,16 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       <button class="btn" data-tab="plan"><span>预算、定期项目、目标、提醒</span><span>›</span></button>
       <button class="btn" data-tab="settings"><span>导入账单、备份、成员、设置</span><span>›</span></button>
     </div>
+  </div>
+</div>
+
+<!-- First-run setup wizard -->
+<div class="sheet" id="wizSheet" hidden>
+  <div class="panelbox wiz" role="dialog" aria-modal="true" aria-labelledby="wzTitle">
+    <div class="ph"><div><h2 id="wzTitle">新手设置</h2><div class="muted" id="wzStep"></div></div><button class="btn small" id="wzClose" type="button">稍后再说</button></div>
+    <div class="steps" id="wzBar"></div>
+    <div id="wzBody"></div>
+    <div class="acts"><button class="btn" id="wzBack" type="button">上一步</button><button class="btn primary" id="wzNext" type="button">下一步</button></div>
   </div>
 </div>
 
@@ -927,6 +963,170 @@ function renderOverview() {
   $('pending').innerHTML = items.length ? '<ul class="list">' + items.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul>' : '<span class="muted">没有待处理事项。</span>';
   $('subline').textContent = (t.missing + t.carried ? '余额待更新 ' + (t.missing + t.carried) + ' 项 · ' : '') + '金额统一折算为 RM，企业账户单独显示。';
 }
+
+// ---------- first-run wizard ----------
+var W = null;
+function wizReset() {
+  W = { step: 0, members: [], items: {}, incomes: [{ name: '', amount: '', day: 1, accountIdx: 0, auto: true }], budget: '', hasSgd: false };
+  if (S.uid && S.uid !== 'shared') W.members.push(S.uid);
+  arr(S.members).forEach(function (m) { if (W.members.indexOf(m.name) < 0) W.members.push(m.name); });
+}
+function wizTypes(kind) { return L.SETUP_TYPES.filter(function (t) { return t.kind === kind; }); }
+function wizSelected() { return L.SETUP_TYPES.filter(function (t) { return W.items[t.key]; }); }
+// steps: 0 welcome/members, 1 assets types, 2 liability types, 3..n one per selected type, n+1 income & budget, n+2 summary
+function wizSteps() {
+  var steps = [{ id: 'members' }, { id: 'assets' }, { id: 'liabs' }];
+  wizSelected().forEach(function (t) { steps.push({ id: 'type', type: t }); });
+  steps.push({ id: 'income' }); steps.push({ id: 'summary' });
+  return steps;
+}
+function wizOpen() {
+  if (!W) wizReset();
+  W.step = 0;
+  wizRender();
+  $('wizSheet').hidden = false;
+}
+function wizCollect() {
+  var st = wizSteps()[W.step];
+  if (st.id === 'type') {
+    var rows = Array.prototype.slice.call($('wzBody').querySelectorAll('[data-row]')).map(function (el) {
+      return { name: el.querySelector('[data-f="name"]').value, amount: el.querySelector('[data-f="amount"]').value,
+        currency: (el.querySelector('[data-f="currency"]') || {}).value || 'MYR', rate: (el.querySelector('[data-f="rate"]') || {}).value || '', pay: (el.querySelector('[data-f="pay"]') || {}).value || '' };
+    });
+    W.items[st.type.key] = rows;
+  }
+  if (st.id === 'income') {
+    W.incomes = Array.prototype.slice.call($('wzBody').querySelectorAll('[data-row]')).map(function (el) {
+      return { name: el.querySelector('[data-f="name"]').value, amount: el.querySelector('[data-f="amount"]').value, day: el.querySelector('[data-f="day"]').value,
+        accountIdx: el.querySelector('[data-f="acc"]').value, auto: el.querySelector('[data-f="auto"]').checked };
+    });
+    W.budget = $('wzBudget').value;
+  }
+  if (st.id === 'members') W.hasSgd = $('wzSgd').checked;
+}
+function wizAnswers() {
+  return { month: S.month, today: L.todayKuching(), members: W.members, items: W.items, incomes: W.incomes, budget: W.budget };
+}
+function wizRender() {
+  var steps = wizSteps(), st = steps[W.step], n = steps.length;
+  $('wzStep').textContent = '第 ' + (W.step + 1) + ' 步，共 ' + n + ' 步';
+  $('wzBar').innerHTML = steps.map(function (x, i) { return '<i class="' + (i <= W.step ? 'on' : '') + '"></i>'; }).join('');
+  $('wzBack').hidden = W.step === 0;
+  $('wzNext').textContent = st.id === 'summary' ? '完成并保存' : '下一步';
+  var h = '';
+  if (st.id === 'members') {
+    $('wzTitle').textContent = '欢迎';
+    h += '<p class="q">家里有谁会用这个账本？</p><div class="hint">每个人记的账都会标上名字，月底能看每个人花了多少。之后还可以在设置里添加。</div>';
+    h += '<div class="chipsx" id="wzMembers">' + W.members.map(function (m, i) { return '<span>' + esc(m) + '<button type="button" data-rm="' + i + '" aria-label="移除">×</button></span>'; }).join('') + '</div>';
+    h += '<div class="racts"><input id="wzMemberInput" type="text" maxlength="20" placeholder="名字，例如 Liza" style="flex:1"><button class="btn small" type="button" id="wzMemberAdd">添加</button></div>';
+    h += '<p class="q" style="margin-top:16px">有新加坡元（SGD）的账户吗？</p><label class="chk"><input id="wzSgd" type="checkbox"' + (W.hasSgd ? ' checked' : '') + '> 有，填余额时让我选币种（会按当月汇率折算成 RM）</label>';
+  } else if (st.id === 'assets' || st.id === 'liabs') {
+    var kind = st.id === 'assets' ? 'asset' : 'liability';
+    $('wzTitle').textContent = kind === 'asset' ? '你有哪些资产？' : '你有哪些负债？';
+    h += '<p class="q">' + (kind === 'asset' ? '勾选所有有的，下一步再逐项填金额' : '勾选所有有的；没有就直接下一步') + '</p>';
+    h += '<div class="tgrid">' + wizTypes(kind).map(function (t) {
+      var on = !!W.items[t.key];
+      return '<label class="' + (on ? 'on' : '') + '"><input type="checkbox" data-type="' + t.key + '"' + (on ? ' checked' : '') + '><span><b>' + esc(t.label) + '</b><small>' + esc(t.ph) + '</small></span></label>';
+    }).join('') + '</div>';
+  } else if (st.id === 'type') {
+    var t = st.type, rows = W.items[t.key] && W.items[t.key].length ? W.items[t.key] : [{ name: '', amount: '', currency: 'MYR', rate: '', pay: '' }];
+    $('wzTitle').textContent = t.label;
+    h += '<p class="q">' + (t.kind === 'asset' ? '每一个填名称和现在的价值' : '每一笔填名称和还欠多少') + '</p><div class="hint">' + esc(t.hint) + '</div>';
+    h += rows.map(function (r) { return wizRow(t, r); }).join('');
+    h += '<button class="btn small" type="button" id="wzAddRow">+ 再加一个</button>';
+  } else if (st.id === 'income') {
+    $('wzTitle').textContent = '收入与预算';
+    var cashAccs = [].concat(W.items.cash || [], W.items.ewallet || []).filter(function (r) { return String(r.name || '').trim(); });
+    h += '<p class="q">每个月固定的收入有哪些？</p><div class="hint">工资、生意提款、租金等。填了之后每月会自动提醒或自动记账，不用手动输。没有固定收入可以跳过。</div>';
+    h += W.incomes.map(function (inc, i) {
+      return '<div class="rowi" data-row><label class="full">名称<input data-f="name" type="text" value="' + esc(inc.name) + '" placeholder="例如：Chen 工资、生意提款"></label>' +
+        '<label>每月金额（RM）<input data-f="amount" type="text" inputmode="decimal" value="' + esc(inc.amount) + '"></label><label>每月几号到账<input data-f="day" type="number" min="1" max="31" value="' + esc(inc.day || 1) + '"></label>' +
+        '<label class="full">进哪个户口<select data-f="acc">' + (cashAccs.length ? cashAccs.map(function (a, j) { return '<option value="' + j + '"' + (String(inc.accountIdx) === String(j) ? ' selected' : '') + '>' + esc(a.name) + '</option>'; }).join('') : '<option value="0">（之后再选）</option>') + '</select></label>' +
+        '<label class="full chk"><input data-f="auto" type="checkbox"' + (inc.auto ? ' checked' : '') + '> 到日期自动记账（不勾则每月提醒你确认）</label></div>';
+    }).join('');
+    h += '<button class="btn small" type="button" id="wzAddRow">+ 再加一项收入</button>';
+    h += '<p class="q" style="margin-top:16px">每个月打算花多少？（可空）</p><div class="hint">总预算。总览会显示还剩多少、平均每天能花多少。之后也可以给每个分类单独设预算。</div><label>每月总预算（RM）<input id="wzBudget" type="text" inputmode="decimal" value="' + esc(W.budget) + '" placeholder="例如 4000"></label>';
+  } else if (st.id === 'summary') {
+    $('wzTitle').textContent = '确认';
+    var b = L.buildSetup(wizAnswers());
+    var accs = {}; Object.keys(b.accounts).forEach(function (id) { accs[id] = Object.assign({ id: id }, b.accounts[id]); });
+    var tot = L.familyTotals(accs, b.balances, S.rates, S.month), biz = L.businessTotals(accs, b.balances, S.rates, S.month);
+    var nA = Object.keys(b.accounts).length;
+    h += '<p class="q">将建立 ' + nA + ' 个账户</p>';
+    h += '<div class="sum"><div><span class="muted">家庭总资产</span><b>' + rm(tot.assets) + '</b></div><div><span class="muted">家庭总负债</span><b>' + rm(tot.liabs) + '</b></div><div><span class="muted">家庭净资产</span><b class="pos">' + rm(tot.net) + '</b></div><div><span class="muted">企业净现金</span><b>' + rm(biz.net) + '</b></div></div>';
+    h += '<ul class="hist">' + Object.keys(b.accounts).map(function (id) { var a = b.accounts[id], bal = b.balances[S.month + '__' + id]; return '<li><span>' + esc(a.name) + ' <span class="muted">' + esc(a.category) + (a.group === 'business' ? ' · 企业' : '') + '</span></span><span>' + esc(a.currency + ' ' + num(bal.amount)) + '</span></li>'; }).join('') + '</ul>';
+    if (Object.keys(b.recurring).length) h += '<p class="muted" style="margin-top:8px">定期收入：' + Object.keys(b.recurring).map(function (k) { return b.recurring[k].name + ' RM ' + num(b.recurring[k].amount); }).join('、') + '</p>';
+    if (b.errors.length) h += '<div class="hint" style="color:var(--neg)">有几行填得不完整，会被跳过：' + b.errors.map(esc).join('；') + '</div>';
+    if (!nA) h += '<div class="hint">还没有填任何账户。可以回上一步补，或直接完成，之后在「余额」里添加。</div>';
+    h += '<div class="hint">保存后余额记在 ' + S.month + '，之后每个月在「余额 → 本月批量更新」更新一次就好。</div>';
+  }
+  $('wzBody').innerHTML = h;
+  $('wizSheet').querySelector('.panelbox').scrollTop = 0;
+}
+function wizRow(t, r) {
+  var cur = W.hasSgd ? '<label>币种<select data-f="currency"><option value="MYR"' + (r.currency !== 'SGD' ? ' selected' : '') + '>MYR</option><option value="SGD"' + (r.currency === 'SGD' ? ' selected' : '') + '>SGD</option></select></label>' : '';
+  var loan = t.loan ? '<label>月供（RM，可空）<input data-f="pay" type="text" inputmode="decimal" value="' + esc(r.pay || '') + '"></label><label>年利率（%，可空）<input data-f="rate" type="number" step="0.01" inputmode="decimal" value="' + esc(r.rate || '') + '"></label>' : '';
+  return '<div class="rowi" data-row><label class="' + (W.hasSgd ? '' : 'full') + '">名称<input data-f="name" type="text" maxlength="60" value="' + esc(r.name || '') + '" placeholder="' + esc(t.ph) + '"></label>' + cur +
+    '<label class="full">' + (t.kind === 'asset' ? '现在的价值' : '还欠多少') + '<input data-f="amount" type="text" inputmode="decimal" value="' + esc(r.amount || '') + '" placeholder="0.00"></label>' + loan +
+    '<button class="btn small danger full" type="button" data-rmrow style="justify-self:end">移除这行</button></div>';
+}
+function wizNext() {
+  wizCollect();
+  var steps = wizSteps(), st = steps[W.step];
+  if (st.id === 'members' && !W.members.length) return toast('至少加一位成员');
+  if (st.id === 'summary') return wizSave();
+  W.step = Math.min(W.step + 1, wizSteps().length - 1);
+  wizRender();
+}
+async function wizSave() {
+  var b = L.buildSetup(wizAnswers());
+  $('wzNext').disabled = true; $('wzNext').textContent = '正在保存…';
+  try {
+    var jobs = [];
+    ['accounts', 'balances', 'members', 'recurring'].forEach(function (col) {
+      Object.keys(b[col]).forEach(function (id) { if (col === 'members' && S.members[id]) return; jobs.push(S.db.collection(col).doc(id).set(b[col][id])); });
+    });
+    if (!Object.keys(S.categories).length) Object.keys(b.categories).forEach(function (id) { jobs.push(S.db.collection('categories').doc(id).set(b.categories[id])); });
+    var prefsNow = prefs();
+    jobs.push(S.db.collection('settings').doc('prefs').set(Object.assign({}, prefsNow, b.settings.prefs, prefsNow.monthlyBudget && !b.settings.prefs.monthlyBudget ? { monthlyBudget: prefsNow.monthlyBudget } : {})));
+    jobs.push(S.db.collection('settings').doc('onboarding').set(b.settings.onboarding));
+    for (var i = 0; i < jobs.length; i += 8) await Promise.all(jobs.slice(i, i + 8));
+    audit('新手设置', S.month, Object.keys(b.accounts).length + ' 个账户');
+    closeSheets(); W = null;
+    toast('设置完成，欢迎使用');
+    showTab('overview');
+  } catch (e) { toast(errText(e)); }
+  finally { $('wzNext').disabled = false; $('wzNext').textContent = '完成并保存'; }
+}
+$('wzNext').addEventListener('click', wizNext);
+$('wzBack').addEventListener('click', function () { wizCollect(); W.step = Math.max(0, W.step - 1); wizRender(); });
+$('wzClose').addEventListener('click', function () {
+  wizCollect(); closeSheets();
+  if (!Object.keys(S.accounts).length) S.db.collection('settings').doc('onboarding').set({ done: false, dismissedAt: L.todayKuching() }).catch(function () {});
+});
+$('wizOpenBtn').addEventListener('click', function () { wizReset(); wizOpen(); });
+$('welcomeWiz').addEventListener('click', function () { wizReset(); wizOpen(); });
+$('wzBody').addEventListener('click', function (e) {
+  if (e.target.id === 'wzMemberAdd') {
+    var v = $('wzMemberInput').value.trim(); if (!v) return;
+    if (W.members.indexOf(v) < 0) W.members.push(v);
+    $('wzMemberInput').value = ''; wizRender(); return;
+  }
+  var rm0 = e.target.closest('[data-rm]');
+  if (rm0) { W.members.splice(Number(rm0.dataset.rm), 1); wizRender(); return; }
+  var tp = e.target.closest('input[data-type]');
+  if (tp) { if (tp.checked) { if (!W.items[tp.dataset.type]) W.items[tp.dataset.type] = []; } else delete W.items[tp.dataset.type]; tp.closest('label').classList.toggle('on', tp.checked); return; }
+  if (e.target.id === 'wzAddRow') {
+    wizCollect();
+    var st = wizSteps()[W.step];
+    if (st.id === 'type') W.items[st.type.key].push({ name: '', amount: '', currency: 'MYR', rate: '', pay: '' });
+    else W.incomes.push({ name: '', amount: '', day: 1, accountIdx: 0, auto: true });
+    wizRender(); return;
+  }
+  var rr = e.target.closest('[data-rmrow]');
+  if (rr) { var row = rr.closest('[data-row]'); row.remove(); wizCollect(); wizRender(); }
+});
+$('wzBody').addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target.id === 'wzMemberInput') { e.preventDefault(); $('wzMemberAdd').click(); } });
 
 // ---------- batch balance update ----------
 function openBatch() {
@@ -2335,6 +2535,11 @@ async function init() {
   $('fDate').value = L.todayKuching();
   setEntryType('expense');
   render();
+  // first run: no accounts and the wizard was never finished or dismissed → open it once
+  setTimeout(function () {
+    var ob = S.settings.onboarding;
+    if (!Object.keys(S.accounts).length && !(ob && (ob.done || ob.dismissedAt)) && !S._wizAuto) { S._wizAuto = true; wizReset(); wizOpen(); }
+  }, 1500);
 }
 init();
 })();
