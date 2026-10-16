@@ -389,6 +389,16 @@ async function handle(req, res) {
     return send(res, 200, fs.readFileSync(file), { 'Content-Type': type, 'Cache-Control': 'public, max-age=3600' });
   }
 
+  // Android package download (key required): the APK built with Bubblewrap, if present
+  if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/download/apk') {
+    if (!key) return send(res, 403, '需要访问密钥', { 'Content-Type': 'text/plain; charset=utf-8' });
+    const apk = path.join(__dirname, 'android', 'app-release-signed.apk');
+    if (!fs.existsSync(apk)) return send(res, 404, '还没有 Android 安装包', { 'Content-Type': 'text/plain; charset=utf-8' });
+    const hdr = { 'Content-Type': 'application/vnd.android.package-archive', 'Content-Disposition': 'attachment; filename="family-assets.apk"', 'Cache-Control': 'no-store', 'Content-Length': String(fs.statSync(apk).size) };
+    if (req.method === 'HEAD') return send(res, 200, '', hdr);
+    return send(res, 200, fs.readFileSync(apk), hdr);
+  }
+
   if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
     if (!key) return send(res, 403, JSON.stringify({ ok: false, error: '未授权', code: 'unauthorized' }), Object.assign({ 'Content-Type': 'application/json' }, req.staleCookie ? { 'Set-Cookie': CLEAR_COOKIE } : {}));
     const fn = url.pathname.slice(5);

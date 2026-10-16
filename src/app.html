@@ -551,7 +551,8 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     <div class="panel">
       <h2>安装到手机</h2>
       <p class="muted" id="installHint">Android Chrome：菜单 → “添加到主屏幕”或“安装应用”。iPhone Safari：分享 → “添加到主屏幕”。安装后像普通 App 一样打开，离线也能打开页面。</p>
-      <div class="acts" style="justify-content:flex-start"><button class="btn" id="installBtn" hidden>安装应用</button><button class="btn" id="logoutBtn">退出（清除这台手机上的密钥）</button></div>
+      <div class="acts" style="justify-content:flex-start"><button class="btn" id="installBtn" hidden>安装应用</button><a class="btn" id="apkLink" href="/download/apk" hidden>下载 Android 安装包（APK）</a><button class="btn" id="logoutBtn">退出（清除这台手机上的密钥）</button></div>
+      <p class="muted" id="apkHint" hidden>Android 手机下载后打开安装（需允许"安装未知应用"）。这是正式上架前的测试包，与网页版数据相同。</p>
     </div>
 
     <div class="panel">
@@ -2610,6 +2611,11 @@ $('rpExport').addEventListener('click', exportReport);
 ['cvCover', 'cvIncome'].forEach(function (id) { $(id).addEventListener('input', renderCover); });
 $('cvSave').addEventListener('click', function () { S.db.collection('settings').doc('prefs').set(Object.assign({}, prefs(), { lifeCover: Number($('cvCover').value) || 0 })).then(function () { toast('已保存'); }).catch(function (e) { toast(errText(e)); }); });
 $('rpPrint').addEventListener('click', printAnnual);
+(function () {
+  if (!/Android/i.test(navigator.userAgent)) return;
+  fetch('/download/apk' + (window.FamilyKey && window.FamilyKey.get() ? '?k=' + encodeURIComponent(window.FamilyKey.get()) : ''), { method: 'HEAD', credentials: 'same-origin' })
+    .then(function (r) { if (r.ok) { $('apkLink').hidden = false; $('apkHint').hidden = false; $('apkLink').href = '/download/apk' + (window.FamilyKey && window.FamilyKey.get() ? '?k=' + encodeURIComponent(window.FamilyKey.get()) : ''); } }).catch(function () {});
+})();
 $('rpExportYear').addEventListener('click', function () {
   var ys = L.yearSummary(txArr(), S.month.slice(0, 4));
   var csv = L.toCSV(ys.rows.concat([Object.assign({ month: '全年' }, ys.total)]), [
