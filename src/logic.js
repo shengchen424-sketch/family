@@ -613,7 +613,8 @@
   // Savings goal progress. current = linked account value (RM) or goal.saved. Months left to goal.targetMonth.
   function goalProgress(goal, accounts, balances, rates, m) {
     var current = Number(goal.saved) || 0;
-    if (goal.accountId && accounts[goal.accountId]) {
+    if (goal.kind === 'networth') current = familyTotals(accounts, balances, rates, m).net;
+    else if (goal.accountId && accounts[goal.accountId]) {
       var r = accountValues({ a: accounts[goal.accountId] }, balances, rates, m)[0];
       if (r && r.rm != null) current = r.rm;
     }
@@ -851,6 +852,128 @@
     return out;
   }
 
+  // ---------- planning tools ----------
+  var RECURRING_TEMPLATES = [
+    { name: '房贷', type: 'repayment', category: '', day: 1 }, { name: '车贷', type: 'repayment', category: '', day: 5 },
+    { name: '人寿保费', type: 'expense', category: '保险', day: 10 }, { name: '医药卡保费', type: 'expense', category: '保险', day: 10 },
+    { name: '车险', type: 'expense', category: '车辆', day: 1, yearly: true }, { name: '路税', type: 'expense', category: '车辆', day: 1, yearly: true },
+    { name: '水费', type: 'expense', category: '水电网', day: 15 }, { name: '电费', type: 'expense', category: '水电网', day: 15 },
+    { name: '网络（Unifi）', type: 'expense', category: '水电网', day: 20 }, { name: '手机话费', type: 'expense', category: '水电网', day: 20 },
+    { name: 'Netflix / 订阅', type: 'expense', category: '娱乐', day: 25 }, { name: '学费 / 托儿', type: 'expense', category: '孩子', day: 1 },
+    { name: '管理费 / 门牌税', type: 'expense', category: '房屋', day: 1 }, { name: '给父母家用', type: 'expense', category: '人情', day: 1 },
+    { name: '工资', type: 'income', category: '工资', day: 28 }, { name: '生意提款', type: 'income', category: '生意提款', day: 1 }, { name: '租金收入', type: 'income', category: '其他收入', day: 5 }
+  ];
+  // Credit card cycle: statement day → due day (dueDay may fall in the next month). spent = charges since the last statement.
+  function cardCycle(acc, tx, today) {
+    var sd = Number(acc.statementDay) || 0, dd = Number(acc.dueDay) || 0;
+    if (!sd) return null;
+    var m = today.slice(0, 7), day = Number(today.slice(8));
+    var lastStmt = day > sd ? dateInMonth(m, sd) : dateInMonth(addMonths(m, -1), sd);
+    var nextStmt = day > sd ? dateInMonth(addMonths(m, 1), sd) : dateInMonth(m, sd);
+    var due = null;
+    if (dd) { due = dd > sd ? dateInMonth(lastStmt.slice(0, 7), dd) : dateInMonth(addMonths(lastStmt.slice(0, 7), 1), dd); }
+    var spent = 0;
+    (tx || []).forEach(function (t) { if (t.account === acc.id && t.type === 'expense' && t.date > lastStmt && t.date <= today) spent += Number(t.amount) || 0; });
+    var daysToDue = due ? Math.round((Date.parse(due) - Date.parse(today)) / 864e5) : null;
+    return { lastStatement: lastStmt, nextStatement: nextStmt, due: due, daysToDue: daysToDue, spent: round2(spent), overdue: daysToDue != null && daysToDue < 0 };
+  }
+  // Net-worth goal: months to reach target at the average monthly change over the available trend.
+  function netWorthForecast(trend, target) {
+    if (!trend || trend.length < 2) return { rate: null, months: null, when: null };
+    var first = trend[0], last = trend[trend.length - 1];
+    var span = Math.max(1, (Number(last.month.slice(0, 4)) - Number(first.month.slice(0, 4))) * 12 + (Number(last.month.slice(5)) - Number(first.month.slice(5))));
+    var rate = (last.net - first.net) / span;
+    if (!(target > last.net)) return { rate: rate, months: 0, when: last.month };
+    if (!(rate > 0)) return { rate: rate, months: null, when: null };
+    var months = Math.ceil((target - last.net) / rate);
+    return { rate: round2(rate), months: months, when: addMonths(last.month, months) };
+  }
+  // Category remembered from earlier entries with the same note (most recent wins).
+  function categoryForNote(tx, note, type) {
+    var k = normalizeText(note);
+    if (!k) return '';
+    var best = null;
+    (tx || []).forEach(function (t) {
+      if (t.type !== type || !t.category) return;
+      var n = normalizeText(t.note);
+      if (n !== k && !(n && k.indexOf(n) === 0 && n.length >= 3)) return;
+      if (!best || (t.date || '') > (best.date || '')) best = t;
+    });
+    return best ? best.category : '';
+  }
+  function memberCategoryMatrix(tx, m) {
+    var rows = {}, cats = {};
+    (tx || []).forEach(function (t) {
+      if (t.month !== m || t.type !== 'expense') return;
+      var mem = t.member || '未指定', c = t.category || '未分类';
+      rows[mem] = rows[mem] || {}; rows[mem][c] = (rows[mem][c] || 0) + (Number(t.amount) || 0); cats[c] = (cats[c] || 0) + (Number(t.amount) || 0);
+    });
+    var catList = Object.keys(cats).sort(function (a, b) { return cats[b] - cats[a]; });
+    return { members: Object.keys(rows), categories: catList, cell: function (mem, c) { return (rows[mem] || {})[c] || 0; }, total: function (mem) { return catList.reduce(function (s, c) { return s + ((rows[mem] || {})[c] || 0); }, 0); } };
+  }
+  // Cash-flow projection: liquid cash today, then each month + recurring income − recurring expense − average other spending.
+  function cashflowForecast(liquid, recurring, tx, m, n) {
+    var out = [], bal = Number(liquid) || 0;
+    var recMonthly = (recurring || []).filter(function (r) { return r.active !== false; });
+    var avgAll = avgMonthlyExpense(tx, m, 3);
+    var recExpAvg = recMonthly.reduce(function (s, r) { return s + (r.type === 'expense' ? Number(r.amount) || 0 : r.type === 'repayment' ? Number(r.interest) || 0 : 0); }, 0);
+    var other = Math.max(0, avgAll - recExpAvg);
+    for (var i = 1; i <= (n || 3); i++) {
+      var mm = addMonths(m, i), inc = 0, exp = 0;
+      recMonthly.forEach(function (r) {
+        if ((r.startMonth && r.startMonth > mm) || (r.endMonth && r.endMonth < mm)) return;
+        if (r.type === 'income') inc += Number(r.amount) || 0;
+        else exp += Number(r.amount) || 0; // repayments leave cash in full
+      });
+      bal = round2(bal + inc - exp - other);
+      out.push({ month: mm, income: round2(inc), fixed: round2(exp), other: round2(other), balance: bal });
+    }
+    return out;
+  }
+  // Financial independence: FI number = yearly expense × 25; years to reach it with monthly saving at a return rate.
+  function fiCalc(opts) {
+    var annual = (Number(opts.monthlyExpense) || 0) * 12, target = annual * (Number(opts.multiple) || 25);
+    var net = Number(opts.investable) || 0, save = Number(opts.monthlySaving) || 0, r = (Number(opts.returnPct) || 0) / 100 / 12;
+    if (target <= 0) return { target: 0, years: null, pct: null };
+    if (net >= target) return { target: target, years: 0, pct: 1 };
+    var months = 0, b = net;
+    while (b < target && months < 1200) { b = b * (1 + r) + save; months++; }
+    return { target: round2(target), years: months >= 1200 ? null : round2(months / 12), pct: Math.min(1, net / target), monthlyPassive: round2(target * 0.04 / 12) };
+  }
+  // Extra monthly repayment: months and interest saved.
+  function prepaySim(balance, ratePct, payment, extra) {
+    var base = monthsToPayoff(balance, ratePct, payment), baseInt = totalInterestToPayoff(balance, ratePct, payment);
+    var np = Number(payment) + Number(extra || 0);
+    var alt = monthsToPayoff(balance, ratePct, np), altInt = totalInterestToPayoff(balance, ratePct, np);
+    if (base == null || alt == null) return null;
+    return { months: alt, monthsSaved: base - alt, interestSaved: round2(baseInt - altInt), interest: altInt };
+  }
+  // Life cover rule of thumb: 10× annual income + debts − liquid assets.
+  function coverCheck(opts) {
+    var need = round2(Math.max(0, (Number(opts.annualIncome) || 0) * 10 + (Number(opts.debts) || 0) - (Number(opts.liquid) || 0)));
+    var have = Number(opts.cover) || 0;
+    return { need: need, have: have, gap: round2(Math.max(0, need - have)), ok: have >= need };
+  }
+  // Malaysian household spending shares (DOSM HES 2022, rounded) for a rough comparison.
+  var MY_HOUSEHOLD_SHARES = [['饮食', 17], ['房屋', 23], ['水电网', 4], ['交通与油费', 13], ['娱乐', 5], ['医疗', 2], ['孩子', 3], ['保险', 4], ['日用', 6], ['其他支出', 23]];
+  function compareShares(report) {
+    var total = (report || []).reduce(function (s, r) { return s + r.amount; }, 0);
+    return MY_HOUSEHOLD_SHARES.map(function (x) {
+      var r = (report || []).filter(function (q) { return q.name === x[0]; })[0];
+      var mine = total > 0 && r ? r.amount / total * 100 : 0;
+      return { name: x[0], mine: round2(mine), ref: x[1], diff: round2(mine - x[1]) };
+    });
+  }
+  // "Giant 买菜 85 块 3 毛" -> { amount: 85.3, note: 'Giant 买菜' } for voice / free-text entry.
+  function parseSpeech(text) {
+    var t = String(text || '').replace(/[，,]/g, ' ').trim();
+    var amount = NaN, m = t.match(/(\d+(?:\.\d+)?)\s*(?:块|元|令吉|ringgit|rm)?\s*(\d+)\s*(?:毛|角)/i);
+    if (m) amount = Number(m[1]) + Number(m[2]) / 10;
+    else { var ms = t.match(/\d+(?:\.\d+)?/g); if (ms) amount = Number(ms[ms.length - 1]); }
+    var note = t.replace(/(?:rm|ringgit)?\s*\d+(?:\.\d+)?\s*(?:块|元|令吉|ringgit|rm)?\s*(?:\d+\s*(?:毛|角))?/ig, ' ').replace(/\s+/g, ' ').trim();
+    return { amount: isFinite(amount) ? round2(amount) : NaN, note: note };
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -875,7 +998,10 @@
     cashEstimate: cashEstimate, budgetSummary: budgetSummary, goalProgress: goalProgress, insights: insights, findSimilar: findSimilar,
     evalAmount: evalAmount, amortization: amortization,
     dayTotals: dayTotals, calendarGrid: calendarGrid, weekSummary: weekSummary, dueAutoPost: dueAutoPost,
-    healthCheck: healthCheck, SETUP_TYPES: SETUP_TYPES, SETUP_CATEGORIES: SETUP_CATEGORIES, buildSetup: buildSetup, LIQUID: LIQUID
+    healthCheck: healthCheck, SETUP_TYPES: SETUP_TYPES, SETUP_CATEGORIES: SETUP_CATEGORIES, buildSetup: buildSetup, LIQUID: LIQUID,
+    RECURRING_TEMPLATES: RECURRING_TEMPLATES, cardCycle: cardCycle, netWorthForecast: netWorthForecast, categoryForNote: categoryForNote,
+    memberCategoryMatrix: memberCategoryMatrix, cashflowForecast: cashflowForecast, fiCalc: fiCalc, prepaySim: prepaySim, coverCheck: coverCheck,
+    compareShares: compareShares, parseSpeech: parseSpeech, MY_HOUSEHOLD_SHARES: MY_HOUSEHOLD_SHARES
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;

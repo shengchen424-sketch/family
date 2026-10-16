@@ -508,4 +508,56 @@ t('setup types cover the common asset and liability classes', () => {
   assert.ok(L.SETUP_TYPES.every(x => x.hint && x.label && x.ph));
 });
 
+// 16. Planning tools
+t('credit card cycle: statement, due date, spent since statement', () => {
+  const acc = { id: 'card', statementDay: 15, dueDay: 5 };
+  const txs = [{ account: 'card', type: 'expense', date: '2026-10-16', amount: 100 }, { account: 'card', type: 'expense', date: '2026-10-10', amount: 50 }];
+  const c = L.cardCycle(acc, txs, '2026-10-20');
+  assert.strictEqual(c.lastStatement, '2026-10-15'); assert.strictEqual(c.due, '2026-11-05'); assert.strictEqual(c.spent, 100); assert.strictEqual(c.daysToDue, 16);
+  const c2 = L.cardCycle(acc, txs, '2026-10-10');
+  assert.strictEqual(c2.lastStatement, '2026-09-15'); assert.strictEqual(c2.due, '2026-10-05'); assert.strictEqual(c2.overdue, true);
+  assert.strictEqual(L.cardCycle({ id: 'x' }, [], '2026-10-10'), null);
+});
+t('net worth forecast from trend', () => {
+  const f = L.netWorthForecast([{ month: '2026-07', net: 100 }, { month: '2026-10', net: 400 }], 1000);
+  assert.strictEqual(f.rate, 100); assert.strictEqual(f.months, 6); assert.strictEqual(f.when, '2027-04');
+  assert.strictEqual(L.netWorthForecast([{ month: '2026-07', net: 500 }, { month: '2026-10', net: 400 }], 1000).months, null);
+  assert.strictEqual(L.netWorthForecast([{ month: '2026-10', net: 400 }], 1000).months, null);
+});
+t('category remembered from note', () => {
+  const txs = [{ type: 'expense', note: 'Giant', category: '饮食', date: '2026-09-01' }, { type: 'expense', note: 'Giant', category: '日用', date: '2026-10-01' }];
+  assert.strictEqual(L.categoryForNote(txs, 'giant ', 'expense'), '日用');
+  assert.strictEqual(L.categoryForNote(txs, 'Giant 买菜', 'expense'), '日用', 'prefix match');
+  assert.strictEqual(L.categoryForNote(txs, 'Tesco', 'expense'), '');
+});
+t('member × category matrix', () => {
+  const mx = L.memberCategoryMatrix([{ type: 'expense', month: M, member: 'Chen', category: '饮食', amount: 10 }, { type: 'expense', month: M, member: 'Liza', category: '饮食', amount: 5 }, { type: 'expense', month: M, member: 'Liza', category: '孩子', amount: 20 }], M);
+  assert.deepStrictEqual(mx.categories, ['孩子', '饮食']); assert.strictEqual(mx.cell('Liza', '孩子'), 20); assert.strictEqual(mx.total('Chen'), 10);
+});
+t('cash-flow forecast', () => {
+  const rec = [{ type: 'income', amount: 8000, active: true }, { type: 'expense', amount: 1000, active: true }, { type: 'repayment', amount: 1000, interest: 300, active: true }];
+  const txs = [{ type: 'expense', month: M, amount: 2300 }];
+  const f = L.cashflowForecast(10000, rec, txs, M, 2);
+  assert.strictEqual(f.length, 2); assert.strictEqual(f[0].income, 8000); assert.strictEqual(f[0].fixed, 2000); assert.strictEqual(f[0].other, 1000);
+  assert.strictEqual(f[0].balance, 15000); assert.strictEqual(f[1].balance, 20000);
+});
+t('FI calculator, prepayment simulation, cover check', () => {
+  const fi = L.fiCalc({ monthlyExpense: 4000, investable: 200000, monthlySaving: 3000, returnPct: 6 });
+  assert.strictEqual(fi.target, 1200000); assert.ok(fi.years > 10 && fi.years < 20, 'years ' + fi.years);
+  assert.strictEqual(L.fiCalc({ monthlyExpense: 1000, investable: 400000 }).years, 0);
+  const p = L.prepaySim(58971, 4.5, 1000, 500);
+  assert.ok(p.monthsSaved > 15 && p.interestSaved > 1500, JSON.stringify(p));
+  const c = L.coverCheck({ annualIncome: 96000, debts: 230000, liquid: 60000, cover: 500000 });
+  assert.strictEqual(c.need, 1130000); assert.strictEqual(c.gap, 630000); assert.strictEqual(c.ok, false);
+});
+t('household share comparison and speech parsing', () => {
+  const cmp = L.compareShares([{ name: '饮食', amount: 500 }, { name: '房屋', amount: 500 }]);
+  assert.strictEqual(cmp[0].mine, 50); assert.strictEqual(cmp[0].ref, 17);
+  assert.deepStrictEqual(L.parseSpeech('Giant 买菜 85 块 3 毛'), { amount: 85.3, note: 'Giant 买菜' });
+  assert.deepStrictEqual(L.parseSpeech('午餐 15.5'), { amount: 15.5, note: '午餐' });
+  assert.deepStrictEqual(L.parseSpeech('RM 20 petrol'), { amount: 20, note: 'petrol' });
+  assert.ok(isNaN(L.parseSpeech('没有数字').amount));
+  assert.ok(L.RECURRING_TEMPLATES.length >= 15);
+});
+
 console.log('\n' + passed + ' tests passed');

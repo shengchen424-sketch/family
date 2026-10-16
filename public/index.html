@@ -359,6 +359,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       </div>
       <div class="muted" id="entryHint" style="margin-top:8px"></div>
       <div class="acts">
+        <button class="btn" id="voiceBtn" type="button" hidden>🎤 语音</button>
         <button class="btn" id="fCancel" hidden>取消修改</button>
         <button class="btn primary" id="fSave">保存</button>
       </div>
@@ -407,6 +408,44 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     <div class="panel">
       <h2>账户进出（本月）</h2>
       <div id="rpAccounts"></div>
+    </div>
+    <div class="panel">
+      <h2>谁花在什么上（本月）</h2>
+      <div style="overflow-x:auto"><table class="tbl" id="rpMatrix"></table></div>
+    </div>
+    <div class="panel">
+      <h2>现金流预测（未来 3 个月）</h2>
+      <p class="muted">从现在的可动用现金出发，加定期收入、减定期支出和近 3 个月平均的其他开销。</p>
+      <div style="overflow-x:auto"><table class="tbl" id="rpForecast"></table></div>
+    </div>
+    <div class="panel">
+      <h2>和马来西亚平均家庭比</h2>
+      <p class="muted">参考统计局家庭开支调查的大致占比，只是参考。</p>
+      <div id="rpCompare"></div>
+    </div>
+    <div class="panel">
+      <h2>财务自由计算</h2>
+      <div class="form">
+        <label>每月开销（RM）<input id="fiExp" type="number" inputmode="decimal"></label>
+        <label>可投资资产（RM）<input id="fiInv" type="number" inputmode="decimal"></label>
+        <label>每月新增储蓄（RM）<input id="fiSave" type="number" inputmode="decimal"></label>
+        <label>年化回报（%）<input id="fiRet" type="number" step="0.1" inputmode="decimal" value="6"></label>
+      </div>
+      <div class="muted" id="fiOut" style="margin-top:8px"></div>
+    </div>
+    <div class="panel">
+      <h2>人寿保障够不够</h2>
+      <p class="muted">经验法则：需要的保额 ≈ 年收入 × 10 + 负债 − 可动用现金。</p>
+      <div class="form">
+        <label>全家人寿保额合计（RM）<input id="cvCover" type="number" inputmode="decimal"></label>
+        <label>年收入（RM，默认按近 3 个月推算）<input id="cvIncome" type="number" inputmode="decimal"></label>
+      </div>
+      <div class="muted" id="cvOut" style="margin-top:8px"></div>
+      <div class="acts" style="margin-top:6px"><button class="btn small" id="cvSave">保存保额</button></div>
+    </div>
+    <div class="panel">
+      <h2>年度报告</h2>
+      <div class="acts" style="justify-content:flex-start"><button class="btn" id="rpPrint">生成年度报告（打印 / 存 PDF）</button></div>
     </div>
     <div class="panel">
       <h2>净资产（近 12 个月）</h2>
@@ -568,7 +607,16 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
           <label>月供（RM）<input id="aPay" type="number" step="0.01" inputmode="decimal"></label>
           <label>到期日<input id="aEnd" type="date"></label>
           <label>结清报价（RM）<input id="aQuote" type="number" step="0.01" inputmode="decimal"></label>
+          <label>每月多还（模拟，RM）<input id="aExtra" type="number" step="1" inputmode="decimal" placeholder="例如 500"></label>
         </div>
+        <div class="muted" id="aPrepay"></div>
+      </div>
+      <div class="full row-h" id="aCardFields" hidden>
+        <div class="fields" style="margin:0">
+          <label>账单日（每月几号）<input id="aStmtDay" type="number" min="1" max="31" inputmode="numeric"></label>
+          <label>到期日（每月几号）<input id="aDueDay" type="number" min="1" max="31" inputmode="numeric"></label>
+        </div>
+        <div class="muted" id="aCardInfo"></div>
       </div>
     </div>
     <div class="muted" id="aHint"></div>
@@ -606,6 +654,8 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 <div class="sheet" id="recSheet" hidden>
   <div class="panelbox" role="dialog" aria-modal="true">
     <div class="ph"><h2 id="rTitle">定期项目</h2><button class="btn small" data-close>关闭</button></div>
+    <div class="muted" style="margin-bottom:4px">常见项目，点一下自动填：</div>
+    <div class="chips" id="rTemplates" style="margin-bottom:10px"></div>
     <div class="fields">
       <label>名称<input id="rName" type="text" maxlength="60" placeholder="例如：房贷、车险、Netflix"></label>
       <label>类型<select id="rType"><option value="expense">支出</option><option value="income">收入</option><option value="repayment">贷款还款</option></select></label>
@@ -724,6 +774,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
   <div class="panelbox" role="dialog" aria-modal="true">
     <div class="ph"><h2 id="gTitle">储蓄目标</h2><button class="btn small" data-close>关闭</button></div>
     <div class="fields">
+      <label>类型<select id="gKind"><option value="saving">储蓄目标（某个账户或手动记录）</option><option value="networth">净资产目标（按家庭净资产算进度）</option></select></label>
       <label>名称<input id="gName" type="text" maxlength="40" placeholder="例如：紧急备用金、Uning 教育金、日本旅行"></label>
       <label>目标金额（RM）<input id="gTarget" type="number" step="0.01" inputmode="decimal"></label>
       <label>关联账户（用它的余额算进度，可空）<select id="gAcc"></select></label>
@@ -1376,7 +1427,8 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
   // Savings goal progress. current = linked account value (RM) or goal.saved. Months left to goal.targetMonth.
   function goalProgress(goal, accounts, balances, rates, m) {
     var current = Number(goal.saved) || 0;
-    if (goal.accountId && accounts[goal.accountId]) {
+    if (goal.kind === 'networth') current = familyTotals(accounts, balances, rates, m).net;
+    else if (goal.accountId && accounts[goal.accountId]) {
       var r = accountValues({ a: accounts[goal.accountId] }, balances, rates, m)[0];
       if (r && r.rm != null) current = r.rm;
     }
@@ -1614,6 +1666,128 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     return out;
   }
 
+  // ---------- planning tools ----------
+  var RECURRING_TEMPLATES = [
+    { name: '房贷', type: 'repayment', category: '', day: 1 }, { name: '车贷', type: 'repayment', category: '', day: 5 },
+    { name: '人寿保费', type: 'expense', category: '保险', day: 10 }, { name: '医药卡保费', type: 'expense', category: '保险', day: 10 },
+    { name: '车险', type: 'expense', category: '车辆', day: 1, yearly: true }, { name: '路税', type: 'expense', category: '车辆', day: 1, yearly: true },
+    { name: '水费', type: 'expense', category: '水电网', day: 15 }, { name: '电费', type: 'expense', category: '水电网', day: 15 },
+    { name: '网络（Unifi）', type: 'expense', category: '水电网', day: 20 }, { name: '手机话费', type: 'expense', category: '水电网', day: 20 },
+    { name: 'Netflix / 订阅', type: 'expense', category: '娱乐', day: 25 }, { name: '学费 / 托儿', type: 'expense', category: '孩子', day: 1 },
+    { name: '管理费 / 门牌税', type: 'expense', category: '房屋', day: 1 }, { name: '给父母家用', type: 'expense', category: '人情', day: 1 },
+    { name: '工资', type: 'income', category: '工资', day: 28 }, { name: '生意提款', type: 'income', category: '生意提款', day: 1 }, { name: '租金收入', type: 'income', category: '其他收入', day: 5 }
+  ];
+  // Credit card cycle: statement day → due day (dueDay may fall in the next month). spent = charges since the last statement.
+  function cardCycle(acc, tx, today) {
+    var sd = Number(acc.statementDay) || 0, dd = Number(acc.dueDay) || 0;
+    if (!sd) return null;
+    var m = today.slice(0, 7), day = Number(today.slice(8));
+    var lastStmt = day > sd ? dateInMonth(m, sd) : dateInMonth(addMonths(m, -1), sd);
+    var nextStmt = day > sd ? dateInMonth(addMonths(m, 1), sd) : dateInMonth(m, sd);
+    var due = null;
+    if (dd) { due = dd > sd ? dateInMonth(lastStmt.slice(0, 7), dd) : dateInMonth(addMonths(lastStmt.slice(0, 7), 1), dd); }
+    var spent = 0;
+    (tx || []).forEach(function (t) { if (t.account === acc.id && t.type === 'expense' && t.date > lastStmt && t.date <= today) spent += Number(t.amount) || 0; });
+    var daysToDue = due ? Math.round((Date.parse(due) - Date.parse(today)) / 864e5) : null;
+    return { lastStatement: lastStmt, nextStatement: nextStmt, due: due, daysToDue: daysToDue, spent: round2(spent), overdue: daysToDue != null && daysToDue < 0 };
+  }
+  // Net-worth goal: months to reach target at the average monthly change over the available trend.
+  function netWorthForecast(trend, target) {
+    if (!trend || trend.length < 2) return { rate: null, months: null, when: null };
+    var first = trend[0], last = trend[trend.length - 1];
+    var span = Math.max(1, (Number(last.month.slice(0, 4)) - Number(first.month.slice(0, 4))) * 12 + (Number(last.month.slice(5)) - Number(first.month.slice(5))));
+    var rate = (last.net - first.net) / span;
+    if (!(target > last.net)) return { rate: rate, months: 0, when: last.month };
+    if (!(rate > 0)) return { rate: rate, months: null, when: null };
+    var months = Math.ceil((target - last.net) / rate);
+    return { rate: round2(rate), months: months, when: addMonths(last.month, months) };
+  }
+  // Category remembered from earlier entries with the same note (most recent wins).
+  function categoryForNote(tx, note, type) {
+    var k = normalizeText(note);
+    if (!k) return '';
+    var best = null;
+    (tx || []).forEach(function (t) {
+      if (t.type !== type || !t.category) return;
+      var n = normalizeText(t.note);
+      if (n !== k && !(n && k.indexOf(n) === 0 && n.length >= 3)) return;
+      if (!best || (t.date || '') > (best.date || '')) best = t;
+    });
+    return best ? best.category : '';
+  }
+  function memberCategoryMatrix(tx, m) {
+    var rows = {}, cats = {};
+    (tx || []).forEach(function (t) {
+      if (t.month !== m || t.type !== 'expense') return;
+      var mem = t.member || '未指定', c = t.category || '未分类';
+      rows[mem] = rows[mem] || {}; rows[mem][c] = (rows[mem][c] || 0) + (Number(t.amount) || 0); cats[c] = (cats[c] || 0) + (Number(t.amount) || 0);
+    });
+    var catList = Object.keys(cats).sort(function (a, b) { return cats[b] - cats[a]; });
+    return { members: Object.keys(rows), categories: catList, cell: function (mem, c) { return (rows[mem] || {})[c] || 0; }, total: function (mem) { return catList.reduce(function (s, c) { return s + ((rows[mem] || {})[c] || 0); }, 0); } };
+  }
+  // Cash-flow projection: liquid cash today, then each month + recurring income − recurring expense − average other spending.
+  function cashflowForecast(liquid, recurring, tx, m, n) {
+    var out = [], bal = Number(liquid) || 0;
+    var recMonthly = (recurring || []).filter(function (r) { return r.active !== false; });
+    var avgAll = avgMonthlyExpense(tx, m, 3);
+    var recExpAvg = recMonthly.reduce(function (s, r) { return s + (r.type === 'expense' ? Number(r.amount) || 0 : r.type === 'repayment' ? Number(r.interest) || 0 : 0); }, 0);
+    var other = Math.max(0, avgAll - recExpAvg);
+    for (var i = 1; i <= (n || 3); i++) {
+      var mm = addMonths(m, i), inc = 0, exp = 0;
+      recMonthly.forEach(function (r) {
+        if ((r.startMonth && r.startMonth > mm) || (r.endMonth && r.endMonth < mm)) return;
+        if (r.type === 'income') inc += Number(r.amount) || 0;
+        else exp += Number(r.amount) || 0; // repayments leave cash in full
+      });
+      bal = round2(bal + inc - exp - other);
+      out.push({ month: mm, income: round2(inc), fixed: round2(exp), other: round2(other), balance: bal });
+    }
+    return out;
+  }
+  // Financial independence: FI number = yearly expense × 25; years to reach it with monthly saving at a return rate.
+  function fiCalc(opts) {
+    var annual = (Number(opts.monthlyExpense) || 0) * 12, target = annual * (Number(opts.multiple) || 25);
+    var net = Number(opts.investable) || 0, save = Number(opts.monthlySaving) || 0, r = (Number(opts.returnPct) || 0) / 100 / 12;
+    if (target <= 0) return { target: 0, years: null, pct: null };
+    if (net >= target) return { target: target, years: 0, pct: 1 };
+    var months = 0, b = net;
+    while (b < target && months < 1200) { b = b * (1 + r) + save; months++; }
+    return { target: round2(target), years: months >= 1200 ? null : round2(months / 12), pct: Math.min(1, net / target), monthlyPassive: round2(target * 0.04 / 12) };
+  }
+  // Extra monthly repayment: months and interest saved.
+  function prepaySim(balance, ratePct, payment, extra) {
+    var base = monthsToPayoff(balance, ratePct, payment), baseInt = totalInterestToPayoff(balance, ratePct, payment);
+    var np = Number(payment) + Number(extra || 0);
+    var alt = monthsToPayoff(balance, ratePct, np), altInt = totalInterestToPayoff(balance, ratePct, np);
+    if (base == null || alt == null) return null;
+    return { months: alt, monthsSaved: base - alt, interestSaved: round2(baseInt - altInt), interest: altInt };
+  }
+  // Life cover rule of thumb: 10× annual income + debts − liquid assets.
+  function coverCheck(opts) {
+    var need = round2(Math.max(0, (Number(opts.annualIncome) || 0) * 10 + (Number(opts.debts) || 0) - (Number(opts.liquid) || 0)));
+    var have = Number(opts.cover) || 0;
+    return { need: need, have: have, gap: round2(Math.max(0, need - have)), ok: have >= need };
+  }
+  // Malaysian household spending shares (DOSM HES 2022, rounded) for a rough comparison.
+  var MY_HOUSEHOLD_SHARES = [['饮食', 17], ['房屋', 23], ['水电网', 4], ['交通与油费', 13], ['娱乐', 5], ['医疗', 2], ['孩子', 3], ['保险', 4], ['日用', 6], ['其他支出', 23]];
+  function compareShares(report) {
+    var total = (report || []).reduce(function (s, r) { return s + r.amount; }, 0);
+    return MY_HOUSEHOLD_SHARES.map(function (x) {
+      var r = (report || []).filter(function (q) { return q.name === x[0]; })[0];
+      var mine = total > 0 && r ? r.amount / total * 100 : 0;
+      return { name: x[0], mine: round2(mine), ref: x[1], diff: round2(mine - x[1]) };
+    });
+  }
+  // "Giant 买菜 85 块 3 毛" -> { amount: 85.3, note: 'Giant 买菜' } for voice / free-text entry.
+  function parseSpeech(text) {
+    var t = String(text || '').replace(/[，,]/g, ' ').trim();
+    var amount = NaN, m = t.match(/(\d+(?:\.\d+)?)\s*(?:块|元|令吉|ringgit|rm)?\s*(\d+)\s*(?:毛|角)/i);
+    if (m) amount = Number(m[1]) + Number(m[2]) / 10;
+    else { var ms = t.match(/\d+(?:\.\d+)?/g); if (ms) amount = Number(ms[ms.length - 1]); }
+    var note = t.replace(/(?:rm|ringgit)?\s*\d+(?:\.\d+)?\s*(?:块|元|令吉|ringgit|rm)?\s*(?:\d+\s*(?:毛|角))?/ig, ' ').replace(/\s+/g, ' ').trim();
+    return { amount: isFinite(amount) ? round2(amount) : NaN, note: note };
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -1638,7 +1812,10 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     cashEstimate: cashEstimate, budgetSummary: budgetSummary, goalProgress: goalProgress, insights: insights, findSimilar: findSimilar,
     evalAmount: evalAmount, amortization: amortization,
     dayTotals: dayTotals, calendarGrid: calendarGrid, weekSummary: weekSummary, dueAutoPost: dueAutoPost,
-    healthCheck: healthCheck, SETUP_TYPES: SETUP_TYPES, SETUP_CATEGORIES: SETUP_CATEGORIES, buildSetup: buildSetup, LIQUID: LIQUID
+    healthCheck: healthCheck, SETUP_TYPES: SETUP_TYPES, SETUP_CATEGORIES: SETUP_CATEGORIES, buildSetup: buildSetup, LIQUID: LIQUID,
+    RECURRING_TEMPLATES: RECURRING_TEMPLATES, cardCycle: cardCycle, netWorthForecast: netWorthForecast, categoryForNote: categoryForNote,
+    memberCategoryMatrix: memberCategoryMatrix, cashflowForecast: cashflowForecast, fiCalc: fiCalc, prepaySim: prepaySim, coverCheck: coverCheck,
+    compareShares: compareShares, parseSpeech: parseSpeech, MY_HOUSEHOLD_SHARES: MY_HOUSEHOLD_SHARES
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;
@@ -2100,6 +2277,10 @@ function renderOverview() {
   var items = [];
   if (t.missing + t.carried > 0) items.push('<button class="row" data-act="goto" data-id="balances"><span class="n"><b>余额未更新</b><small>' + t.missing + ' 项未录入，' + t.carried + ' 项沿用旧值</small></span><span class="v">›</span></button>');
   if (pendingRec.length) items.push('<button class="row" data-act="goto" data-id="plan"><span class="n"><b>定期项目待确认</b><small>' + pendingRec.length + ' 项本月还没有确认</small></span><span class="v">›</span></button>');
+  accList().filter(function (a) { return a.category === '信用卡' && a.statementDay; }).forEach(function (a) {
+    var cc = L.cardCycle(a, txs, today);
+    if (cc && cc.due && cc.daysToDue <= 10) items.push('<button class="row" data-act="open-acc" data-id="' + esc(a.id) + '"><span class="n"><b>' + esc(a.name) + ' 账单' + (cc.overdue ? '已过期' : '将到期') + '</b><small>到期 ' + esc(cc.due) + ' · 本期已刷 ' + rm(cc.spent) + '</small></span><span class="v">›</span></button>');
+  });
   rems.forEach(function (r) {
     var over = r.date < today;
     items.push('<button class="row" data-act="goto" data-id="plan"><span class="n"><b>' + esc(r.title) + '</b><small>' + (over ? '已过期 ' : '') + esc(r.date) + '</small></span><span class="v">›</span></button>');
@@ -2324,7 +2505,11 @@ async function saveBatch() {
 // ---------- goals ----------
 function goalRow(g, m, withBtn) {
   var p = L.goalProgress(g, S.accounts, S.balances, S.rates, m);
-  var sub = p.done ? '已达成 🎉' : '还差 ' + rm(p.remaining) + (p.perMonth != null ? ' · 到 ' + g.targetMonth + ' 每月需存 ' + rm(p.perMonth) : p.monthsLeft === 0 && g.targetMonth ? ' · 已到目标月份' : '') + (g.accountId ? ' · 按 ' + accName(g.accountId) + ' 余额' : '');
+  var sub = p.done ? '已达成 🎉' : '还差 ' + rm(p.remaining) + (p.perMonth != null ? ' · 到 ' + g.targetMonth + ' 每月需存 ' + rm(p.perMonth) : p.monthsLeft === 0 && g.targetMonth ? ' · 已到目标月份' : '') + (g.kind === 'networth' ? ' · 按家庭净资产' : g.accountId ? ' · 按 ' + accName(g.accountId) + ' 余额' : '');
+  if (g.kind === 'networth' && !p.done) {
+    var fc = L.netWorthForecast(L.netWorthTrend(S.accounts, S.balances, S.rates, L.monthRange(m, 12)).map(function (x) { var sn = S.snapshots[x.month]; return sn ? { month: x.month, net: sn.net } : x; }), p.target);
+    sub += fc.months == null ? (fc.rate == null ? ' · 多几个月数据后可预测' : ' · 目前净资产没有增长，无法预测') : ' · 按目前速度（每月 ' + signed(fc.rate) + '）约 ' + fc.when + ' 达成';
+  }
   var inner = '<span class="n"><b>' + esc(g.name) + '</b><small>' + esc(sub) + '</small></span><span class="v"><b class="num">' + num(p.current) + ' / ' + num(p.target) + '</b><span class="st">' + (p.pct * 100).toFixed(0) + '%</span></span>';
   var bar = '<div class="bar-track"><div class="bar-fill goal" style="width:' + (p.pct * 100).toFixed(1) + '%"></div></div>';
   if (withBtn) return '<li class="li" style="display:block"><button class="row" data-act="open-goal" data-id="' + esc(g.id) + '" style="padding:0;width:100%">' + inner + '</button>' + bar + '</li>';
@@ -2335,13 +2520,14 @@ function openGoal(id) {
   var g = id ? S.goals[id] : null;
   fillAll();
   $('gTitle').textContent = g ? '修改目标' : '新增储蓄目标';
+  $('gKind').value = g && g.kind === 'networth' ? 'networth' : 'saving';
   $('gName').value = g ? g.name : ''; $('gTarget').value = g ? g.target : ''; $('gSaved').value = g && g.saved ? g.saved : '';
   $('gAcc').value = g && g.accountId ? g.accountId : ''; $('gMonth').value = g && g.targetMonth ? g.targetMonth : '';
   $('gDel').hidden = !g; $('gDel').textContent = '删除';
   $('goalSheet').hidden = false;
 }
 async function saveGoal() {
-  var body = { name: $('gName').value.trim(), target: round2(Number($('gTarget').value)), accountId: $('gAcc').value || null,
+  var body = { kind: $('gKind').value, name: $('gName').value.trim(), target: round2(Number($('gTarget').value)), accountId: $('gAcc').value || null,
     saved: round2(Number($('gSaved').value) || 0), targetMonth: $('gMonth').value || null, updatedAt: new Date().toISOString() };
   if (!body.name) return toast('请输入名称');
   if (!(body.target > 0)) return toast('目标金额必须大于 0');
@@ -2435,6 +2621,27 @@ function renderReport() {
     return '<div class="kpi"><span>' + esc(accName(k)) + ' <span class="muted">' + fl[k].n + ' 笔</span></span><b><span class="pos">+' + num(fl[k].in) + '</span> / <span class="neg">-' + num(fl[k].out) + '</span></b></div>';
   }).join('') : '<span class="muted">暂无</span>';
 
+  var mx = L.memberCategoryMatrix(txs, m);
+  $('rpMatrix').innerHTML = mx.members.length ? '<tr><th>成员</th>' + mx.categories.map(function (c) { return '<th>' + esc(c) + '</th>'; }).join('') + '<th>合计</th></tr>' +
+    mx.members.map(function (mem) { return '<tr><td>' + esc(memberName(mem)) + '</td>' + mx.categories.map(function (c) { var v = mx.cell(mem, c); return '<td>' + (v ? num(v) : '') + '</td>'; }).join('') + '<td><b>' + num(mx.total(mem)) + '</b></td></tr>'; }).join('') : '<tr><td class="muted">本月没有支出</td></tr>';
+  var tot = L.familyTotals(S.accounts, S.balances, S.rates, m);
+  var fc = L.cashflowForecast(tot.liquid, recArr(), txs, m, 3);
+  $('rpForecast').innerHTML = '<tr><th>月份</th><th>定期收入</th><th>定期支出</th><th>其他开销</th><th>月底现金</th></tr>' + fc.map(function (r) {
+    return '<tr><td>' + r.month + '</td><td class="pos">' + num(r.income) + '</td><td class="neg">' + num(r.fixed) + '</td><td class="neg">' + num(r.other) + '</td><td class="' + (r.balance < 0 ? 'neg' : '') + '"><b>' + num(r.balance) + '</b></td></tr>';
+  }).join('') + '<tr><td class="muted" colspan="5">现在可动用现金 ' + rm(tot.liquid) + (recArr().length ? '' : '。还没有定期项目，预测只扣平均开销。') + '</td></tr>';
+  var cmp = L.compareShares(L.categoryReport(txs, m));
+  $('rpCompare').innerHTML = cmp.filter(function (x) { return x.mine > 0 || x.ref >= 5; }).map(function (x) {
+    return '<div class="trow"><span>' + esc(x.name) + '</span><span class="v">你 ' + x.mine.toFixed(0) + '% · 平均 ' + x.ref + '%' + (x.mine > 0 ? ' <span class="delta ' + (x.diff > 5 ? 'up' : x.diff < -5 ? 'down' : '') + '">' + (x.diff >= 0 ? '+' : '') + x.diff.toFixed(0) + '</span>' : '') + '</span>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + Math.min(100, x.mine).toFixed(1) + '%"></div></div></div>';
+  }).join('');
+  if (!S._fiInit) {
+    S._fiInit = true;
+    var avgE = L.avgMonthlyExpense(txs, m, 3), inv = (tot.byCategory['投资'] || 0) + tot.liquid, cf3 = L.monthRange(m, 3).map(function (x) { return L.cashflow(txs, x).net; }).filter(function (x) { return x !== 0; });
+    $('fiExp').value = Math.round(avgE || Number(prefs().monthlyBudget) || 0); $('fiInv').value = Math.round(inv); $('fiSave').value = Math.round(cf3.length ? Math.max(0, cf3.reduce(function (a, b) { return a + b; }, 0) / cf3.length) : 0);
+    $('cvCover').value = prefs().lifeCover || ''; var inc3 = L.monthRange(m, 3).map(function (x) { return L.cashflow(txs, x).income; }).filter(Boolean);
+    $('cvIncome').value = Math.round(inc3.length ? inc3.reduce(function (a, b) { return a + b; }, 0) / inc3.length * 12 : 0);
+  }
+  renderFi(); renderCover();
   var months12 = L.monthRange(m, 12);
   var nw = L.netWorthTrend(S.accounts, S.balances, S.rates, months12).map(function (x) {
     var sn = S.snapshots[x.month];
@@ -2451,6 +2658,39 @@ function renderReport() {
   $('rpYear').innerHTML = '<tr><th>月份</th><th>收入</th><th>支出</th><th>结余</th><th>储蓄率</th></tr>' + ys.rows.filter(function (r) { return r.income || r.expense; }).map(function (r) {
     return '<tr><td>' + r.month.slice(5) + ' 月</td><td class="pos">' + num(r.income) + '</td><td class="neg">' + num(r.expense) + '</td><td>' + num(r.net) + '</td><td>' + (r.savingsRate == null ? '—' : (r.savingsRate * 100).toFixed(0) + '%') + '</td></tr>';
   }).join('') + '<tr class="tot"><td>全年</td><td class="pos">' + num(ys.total.income) + '</td><td class="neg">' + num(ys.total.expense) + '</td><td>' + num(ys.total.net) + '</td><td>' + (ys.total.savingsRate == null ? '—' : (ys.total.savingsRate * 100).toFixed(0) + '%') + '</td></tr>';
+}
+function renderFi() {
+  var r = L.fiCalc({ monthlyExpense: $('fiExp').value, investable: $('fiInv').value, monthlySaving: $('fiSave').value, returnPct: $('fiRet').value });
+  $('fiOut').innerHTML = r.target ? '财务自由需要约 <b>' + rm(r.target) + '</b>（年开销 × 25，按 4% 提取），目前完成 <b>' + (r.pct * 100).toFixed(1) + '%</b>。' +
+    (r.years === 0 ? '已经达到。' : r.years == null ? '按现在的储蓄速度很难达到，提高储蓄或回报率试试。' : '按现在的储蓄速度约 <b>' + r.years + ' 年</b>后达到，届时每月可提取约 ' + rm(r.monthlyPassive) + '。') : '请填每月开销。';
+}
+function renderCover() {
+  var tot = L.familyTotals(S.accounts, S.balances, S.rates, S.month);
+  var r = L.coverCheck({ annualIncome: $('cvIncome').value, debts: tot.liabs, liquid: tot.liquid, cover: $('cvCover').value });
+  $('cvOut').innerHTML = '建议保额约 <b>' + rm(r.need) + '</b>（年收入 ' + rm(Number($('cvIncome').value) || 0) + ' × 10 + 负债 ' + rm(tot.liabs) + ' − 现金 ' + rm(tot.liquid) + '）。' + (r.ok ? '目前保额足够。' : '目前还差 <b>' + rm(r.gap) + '</b>。');
+}
+function printAnnual() {
+  var year = S.month.slice(0, 4), txs = txArr(), ys = L.yearSummary(txs, year);
+  var months = []; for (var i = 1; i <= 12; i++) { var mm = year + '-' + String(i).padStart(2, '0'); if (mm <= S.month) months.push(mm); }
+  var nw = L.netWorthTrend(S.accounts, S.balances, S.rates, months).map(function (x) { var sn = S.snapshots[x.month]; return sn ? { month: x.month, net: sn.net, assets: sn.assets, liabs: sn.liabs } : x; });
+  var cats = {}; txs.forEach(function (t) { if (t.month.slice(0, 4) === year && t.type === 'expense') cats[t.category || '未分类'] = (cats[t.category || '未分类'] || 0) + t.amount; });
+  var ck = Object.keys(cats).sort(function (a, b) { return cats[b] - cats[a]; }), ct = ck.reduce(function (s, k) { return s + cats[k]; }, 0);
+  var mem = {}; txs.forEach(function (t) { if (t.month.slice(0, 4) === year && t.type === 'expense') mem[t.member || '未指定'] = (mem[t.member || '未指定'] || 0) + t.amount; });
+  var tot = L.familyTotals(S.accounts, S.balances, S.rates, S.month);
+  var css = 'body{font:13px/1.5 -apple-system,system-ui,"PingFang SC","Noto Sans SC",sans-serif;color:#1c1f1b;max-width:760px;margin:0 auto;padding:24px}h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:22px 0 8px;border-bottom:1px solid #ddd;padding-bottom:4px}table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}td,th{padding:5px 6px;border-bottom:1px solid #eee;text-align:right}td:first-child,th:first-child{text-align:left}.k{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.k div{border:1px solid #ddd;border-radius:8px;padding:8px 10px}.k b{display:block;font-size:16px}@media print{button{display:none}}';
+  var h = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>家庭财务年度报告 ' + year + '</title><style>' + css + '</style></head><body>';
+  h += '<h1>家庭财务年度报告 ' + year + '</h1><div style="color:#666">生成于 ' + L.todayKuching() + ' · 数据截至 ' + S.month + '</div>';
+  h += '<h2>净资产</h2><div class="k"><div>家庭总资产<b>' + rm(tot.assets) + '</b></div><div>家庭总负债<b>' + rm(tot.liabs) + '</b></div><div>家庭净资产<b>' + rm(tot.net) + '</b></div></div>';
+  if (nw.length) h += '<table><tr><th>月份</th><th>资产</th><th>负债</th><th>净资产</th></tr>' + nw.map(function (x) { return '<tr><td>' + x.month + '</td><td>' + num(x.assets) + '</td><td>' + num(x.liabs) + '</td><td><b>' + num(x.net) + '</b></td></tr>'; }).join('') + '</table>';
+  h += '<h2>收支</h2><table><tr><th>月份</th><th>收入</th><th>支出</th><th>结余</th><th>储蓄率</th></tr>' + ys.rows.filter(function (r) { return r.income || r.expense; }).map(function (r) { return '<tr><td>' + r.month + '</td><td>' + num(r.income) + '</td><td>' + num(r.expense) + '</td><td>' + num(r.net) + '</td><td>' + (r.savingsRate == null ? '—' : (r.savingsRate * 100).toFixed(0) + '%') + '</td></tr>'; }).join('') +
+    '<tr><td><b>全年</b></td><td><b>' + num(ys.total.income) + '</b></td><td><b>' + num(ys.total.expense) + '</b></td><td><b>' + num(ys.total.net) + '</b></td><td><b>' + (ys.total.savingsRate == null ? '—' : (ys.total.savingsRate * 100).toFixed(0) + '%') + '</b></td></tr></table>';
+  h += '<h2>支出结构</h2><table><tr><th>分类</th><th>金额</th><th>占比</th></tr>' + ck.map(function (k) { return '<tr><td>' + esc(k) + '</td><td>' + num(cats[k]) + '</td><td>' + (ct ? (cats[k] / ct * 100).toFixed(1) : 0) + '%</td></tr>'; }).join('') + '</table>';
+  h += '<h2>按成员</h2><table>' + Object.keys(mem).map(function (k) { return '<tr><td>' + esc(memberName(k)) + '</td><td>' + num(mem[k]) + '</td></tr>'; }).join('') + '</table>';
+  var goals = arr(S.goals); if (goals.length) h += '<h2>目标</h2><table>' + goals.map(function (g) { var p = L.goalProgress(g, S.accounts, S.balances, S.rates, S.month); return '<tr><td>' + esc(g.name) + '</td><td>' + num(p.current) + ' / ' + num(p.target) + '</td><td>' + (p.pct * 100).toFixed(0) + '%</td></tr>'; }).join('') + '</table>';
+  h += '<p style="margin-top:24px"><button onclick="window.print()">打印 / 存为 PDF</button></p></body></html>';
+  var w = window.open('', '_blank');
+  if (!w) return toast('浏览器拦截了新窗口，请允许弹出窗口');
+  w.document.open(); w.document.write(h); w.document.close();
 }
 function exportReport() {
   var rep = L.categoryReport(txArr(), S.month);
@@ -2587,7 +2827,7 @@ function resetEntry(keepEdit) {
   if (!keepEdit) { S.editTxId = null; }
   $('fAmt').value = ''; $('fNote').value = ''; $('fInt').value = ''; $('fFx').value = '';
   $('fDate').value = L.todayKuching();
-  S.memberDefaulted = false;
+  S.memberDefaulted = false; S.catTouched = false;
   if (!S.editTxId && S.uid && S.members[S.uid]) { $('fMember').value = S.uid; S.memberDefaulted = true; }
   setReceipt(null, null);
   $('entryTitle').textContent = S.editTxId ? '修改流水' : '记一笔';
@@ -2940,9 +3180,19 @@ function openRec(id) {
   $('rPrin').value = r && r.type === 'repayment' ? r.principal : '';
   $('rInt').value = r && r.type === 'repayment' ? r.interest : '';
   $('rDel').hidden = !r;
+  $('rTemplates').innerHTML = L.RECURRING_TEMPLATES.map(function (t, i) { return '<button type="button" data-tpl="' + i + '">' + esc(t.name) + '</button>'; }).join('');
   syncRecForm();
   $('recSheet').hidden = false;
 }
+$('rTemplates').addEventListener('click', function (e) {
+  var b = e.target.closest('[data-tpl]'); if (!b) return;
+  var t = L.RECURRING_TEMPLATES[Number(b.dataset.tpl)];
+  $('rName').value = t.name; $('rType').value = t.type; $('rDay').value = t.day;
+  syncRecForm(); fillAll();
+  if (t.category) { if (!catList().some(function (c) { return c.name === t.category; })) S.db.collection('categories').add({ name: t.category, type: t.type === 'income' ? 'income' : 'expense', budget: 0, sort: Object.keys(S.categories).length + 1 }); $('rCat').value = t.category; }
+  if (t.yearly) toast('这是一年一次的项目：建议把年费除以 12 填月均，或填开始和结束月份');
+  $('rAmt').focus();
+});
 function syncRecForm() {
   var t = $('rType').value;
   $('rRowLoan').hidden = t !== 'repayment';
@@ -3074,6 +3324,11 @@ function openAcc(id) {
   $('aPay').value = a.monthlyPayment != null ? a.monthlyPayment : '';
   $('aEnd').value = a.endDate || '';
   $('aQuote').value = a.settlementQuote != null ? a.settlementQuote : '';
+  $('aExtra').value = ''; $('aPrepay').textContent = '';
+  $('aCardFields').hidden = a.category !== '信用卡';
+  $('aStmtDay').value = a.statementDay || ''; $('aDueDay').value = a.dueDay || '';
+  var cc = a.category === '信用卡' ? L.cardCycle(a, txArr(), L.todayKuching()) : null;
+  $('aCardInfo').textContent = cc ? '上次账单日 ' + cc.lastStatement + '，本期已刷 ' + rm(cc.spent) + (cc.due ? '，到期日 ' + cc.due + (cc.overdue ? '（已过期）' : '（还有 ' + cc.daysToDue + ' 天）') : '') : (a.category === '信用卡' ? '填账单日和到期日后，总览会提醒还款。' : '');
   $('aHint').textContent = v.status === 'carried' ? '本月未更新，当前显示 ' + v.b.month + ' 的数值。' : v.status === 'missing' ? '还没有任何余额记录。' : '';
   $('aDeact').textContent = '停用账户';
   $('aDeact').dataset.armed = '';
@@ -3126,6 +3381,8 @@ async function saveAcc() {
     await S.db.collection('balances').doc(S.month + '__' + a.id).set(body);
     if (a.kind === 'liability') {
       var upd = {
+        statementDay: $('aStmtDay').value === '' ? null : Number($('aStmtDay').value),
+        dueDay: $('aDueDay').value === '' ? null : Number($('aDueDay').value),
         rate: $('aRate').value === '' ? null : Number($('aRate').value),
         monthlyPayment: $('aPay').value === '' ? null : Number($('aPay').value),
         endDate: $('aEnd').value || null,
@@ -3568,7 +3825,38 @@ document.addEventListener('click', function (e) {
 });
 $('fLoan').addEventListener('change', function () { $('fAmt').value = ''; $('fInt').value = ''; loanAutofill(); });
 $('fAcc').addEventListener('change', syncFxRow);
+$('aExtra').addEventListener('input', function () {
+  var a = S.accounts[S.editAccId]; if (!a) return;
+  var extra = Number($('aExtra').value) || 0, bal = Number($('aAmt').value) || 0, pay = Number($('aPay').value) || 0, rate = Number($('aRate').value) || 0;
+  if (!(extra > 0) || !(pay > 0) || !(bal > 0)) { $('aPrepay').textContent = ''; return; }
+  var sim = L.prepaySim(bal, rate, pay, extra);
+  $('aPrepay').textContent = sim ? '每月多还 ' + rm(extra) + '：约 ' + sim.months + ' 个月还清，提前 ' + sim.monthsSaved + ' 个月，省利息约 ' + rm(sim.interestSaved) : '月供不足以覆盖利息';
+});
 $('fFx').addEventListener('input', fxToRm);
+$('fCat').addEventListener('change', function () { S.catTouched = true; });
+$('fNote').addEventListener('change', function () {
+  if (S.catTouched || S.editTxId || !(S.entryType === 'income' || S.entryType === 'expense')) return;
+  var c = L.categoryForNote(txArr(), $('fNote').value, S.entryType);
+  if (c && catList(S.entryType).some(function (x) { return x.name === c; })) { $('fCat').value = c; renderChips(); $('entryHint').textContent = '按上次「' + $('fNote').value.trim() + '」自动选了分类「' + c + '」'; }
+});
+// Voice entry (Chrome on Android / Safari on iOS): "Giant 买菜 85 块" → amount + note
+var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+$('voiceBtn').hidden = !SR;
+$('voiceBtn').addEventListener('click', function () {
+  if (!SR) return;
+  var rec = new SR(); rec.lang = 'zh-CN'; rec.interimResults = false; rec.maxAlternatives = 1;
+  $('voiceBtn').textContent = '聆听中…'; $('voiceBtn').disabled = true;
+  rec.onresult = function (e) {
+    var text = e.results[0][0].transcript;
+    var p = L.parseSpeech(text);
+    if (isFinite(p.amount)) $('fAmt').value = p.amount;
+    if (p.note) { $('fNote').value = p.note; $('fNote').dispatchEvent(new Event('change')); }
+    $('entryHint').textContent = '听到：' + text + (isFinite(p.amount) ? '' : '（没听出金额，请手动输入）');
+  };
+  rec.onerror = function (e) { toast('语音识别失败：' + (e.error || '')); };
+  rec.onend = function () { $('voiceBtn').textContent = '🎤 语音'; $('voiceBtn').disabled = false; };
+  try { rec.start(); } catch (e) { toast('这个浏览器不支持语音'); rec.onend(); }
+});
 $('fCat').addEventListener('change', renderChips);
 $('loginBtn').addEventListener('click', doLogin);
 $('loginKey').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
@@ -3576,6 +3864,10 @@ $('logoutBtn').addEventListener('click', function () { if (window.FamilyKey) win
 $('backupBtn').addEventListener('click', backupAll);
 $('restoreFile').addEventListener('change', restoreBackup);
 $('rpExport').addEventListener('click', exportReport);
+['fiExp', 'fiInv', 'fiSave', 'fiRet'].forEach(function (id) { $(id).addEventListener('input', renderFi); });
+['cvCover', 'cvIncome'].forEach(function (id) { $(id).addEventListener('input', renderCover); });
+$('cvSave').addEventListener('click', function () { S.db.collection('settings').doc('prefs').set(Object.assign({}, prefs(), { lifeCover: Number($('cvCover').value) || 0 })).then(function () { toast('已保存'); }).catch(function (e) { toast(errText(e)); }); });
+$('rpPrint').addEventListener('click', printAnnual);
 $('rpExportYear').addEventListener('click', function () {
   var ys = L.yearSummary(txArr(), S.month.slice(0, 4));
   var csv = L.toCSV(ys.rows.concat([Object.assign({ month: '全年' }, ys.total)]), [
