@@ -452,6 +452,24 @@ body.lite .nav [data-tab="ledger"]{display:none}
       <div id="rpCompare"></div>
     </div>
     <div class="panel">
+      <h2>情景模拟</h2>
+      <p class="muted">财务自由年份的定义：在设定的生活水平、通胀、回报和风险假设下，可投资资产按安全提取率产生的被动收入，开始持续覆盖必要开支的那一年。给出保守 / 基准 / 乐观三条路径，不是保证。</p>
+      <div class="form">
+        <label>必要开支（RM/月，默认按固定支出 + 平均开销）<input id="scExp" type="text" inputmode="decimal"></label>
+        <label>每月投入（RM，默认按可分配金额）<input id="scSave" type="text" inputmode="decimal"></label>
+        <label>可投资资产（RM，默认投资 + 退休金 + 超出缓冲的现金）<input id="scInv" type="text" inputmode="decimal"></label>
+        <label>年化回报 %（基准；保守 −3，乐观 +2）<input id="scRet" type="number" step="0.5" inputmode="decimal"></label>
+        <label>通胀 %<input id="scInfl" type="number" step="0.5" inputmode="decimal"></label>
+        <label>安全提取率 %<input id="scSwr" type="number" step="0.5" inputmode="decimal"></label>
+        <label>目前年龄<input id="scAge" type="number" inputmode="numeric"></label>
+        <label>打算退休年龄<input id="scRetire" type="number" inputmode="numeric"></label>
+      </div>
+      <div class="chips" id="scChips" style="margin-top:8px"></div>
+      <div id="scOut" style="margin-top:10px"></div>
+      <div class="muted" id="scLoans" style="margin-top:6px"></div>
+      <div class="acts" style="margin-top:6px"><button class="btn small" id="scSavePrefs">保存假设</button></div>
+    </div>
+    <div class="panel">
       <h2>财务自由计算</h2>
       <div class="form">
         <label>每月开销（RM）<input id="fiExp" type="number" inputmode="decimal"></label>
@@ -1772,7 +1790,7 @@ function renderReport() {
     $('cvCover').value = prefs().lifeCover || ''; var inc3 = L.monthRange(m, 3).map(function (x) { return L.cashflow(txs, x).income; }).filter(Boolean);
     $('cvIncome').value = Math.round(inc3.length ? inc3.reduce(function (a, b) { return a + b; }, 0) / inc3.length * 12 : 0);
   }
-  renderFi(); renderCover();
+  renderFi(); renderCover(); renderScenarios();
   var months12 = L.monthRange(m, 12);
   var nw = L.netWorthTrend(S.accounts, S.balances, S.rates, months12).map(function (x) {
     var sn = S.snapshots[x.month];
@@ -1790,6 +1808,42 @@ function renderReport() {
     return '<tr><td>' + r.month.slice(5) + ' 月</td><td class="pos">' + num(r.income) + '</td><td class="neg">' + num(r.expense) + '</td><td>' + num(r.net) + '</td><td>' + (r.savingsRate == null ? '—' : (r.savingsRate * 100).toFixed(0) + '%') + '</td></tr>';
   }).join('') + '<tr class="tot"><td>全年</td><td class="pos">' + num(ys.total.income) + '</td><td class="neg">' + num(ys.total.expense) + '</td><td>' + num(ys.total.net) + '</td><td>' + (ys.total.savingsRate == null ? '—' : (ys.total.savingsRate * 100).toFixed(0) + '%') + '</td></tr>';
 }
+// ---------- scenario simulation ----------
+var scState = { key: null, inited: false };
+function scBase() {
+  var diag = diagNow(), al = L.allocatable({ tx: txArr(), recurring: recArr(), month: S.month, prefs: prefs(), liquid: diag.liquid });
+  return L.scenarioBase({ diag: diag, al: al, accounts: S.accounts, balances: S.balances, rates: S.rates, tx: txArr(), month: S.month, prefs: prefs() });
+}
+function renderScenarios() {
+  var b = scBase();
+  if (!scState.inited) {
+    scState.inited = true;
+    $('scExp').value = Math.round(b.monthlyExpense) || ''; $('scSave').value = Math.round(b.monthlySaving) || ''; $('scInv').value = Math.round(b.investable) || '';
+    $('scRet').value = b.returnPct; $('scInfl').value = b.inflationPct; $('scSwr').value = b.swr; $('scAge').value = b.age; $('scRetire').value = b.retireAge;
+  }
+  var base = Object.assign({}, b, { monthlyExpense: L.evalAmount($('scExp').value) || b.monthlyExpense, monthlySaving: L.evalAmount($('scSave').value) || 0, investable: L.evalAmount($('scInv').value) || 0,
+    returnPct: Number($('scRet').value) || 6, inflationPct: Number($('scInfl').value) || 0, swr: Number($('scSwr').value) || 4, age: Number($('scAge').value) || 35, retireAge: Number($('scRetire').value) || 60 });
+  $('scChips').innerHTML = '<button type="button" data-sc="" aria-pressed="' + (!scState.key) + '">基准</button>' + L.SCENARIOS.map(function (x) { return '<button type="button" data-sc="' + x.key + '" aria-pressed="' + (scState.key === x.key) + '">' + esc(x.name) + '</button>'; }).join('');
+  var r = L.simulateBands(base, scState.key, 40);
+  var fmtY = function (res) { return res.fiYear == null ? '40 年内达不到' : '第 ' + res.fiYear + ' 年（' + res.fiAge + ' 岁，' + (Number(S.month.slice(0, 4)) + res.fiYear) + '）'; };
+  var h = '<div class="sum"><div><span class="muted">保守（' + (base.returnPct - 3) + '%）</span><b>' + fmtY(r.conservative) + '</b></div><div><span class="muted">基准（' + base.returnPct + '%）</span><b>' + fmtY(r.base) + '</b></div><div><span class="muted">乐观（' + (base.returnPct + 2) + '%）</span><b>' + fmtY(r.optimistic) + '</b></div>' +
+    '<div><span class="muted">退休时资金缺口（基准）</span><b>' + (r.base.retireGap > 0 ? rm(r.base.retireGap) : '无缺口') + '</b></div></div>';
+  if (scState.key && r.baseline.fiYear != null && r.base.fiYear != null) { var d = r.base.fiYear - r.baseline.fiYear; h += '<div class="muted">和不做改变相比：' + (d === 0 ? '财务自由年份不变' : d < 0 ? '提前 ' + (-d) + ' 年' : '推迟 ' + d + ' 年') + '</div>'; }
+  if (scState.key === 'prepay') h += '<div class="muted">提前还款：省利息约 ' + rm(r.base.interestSaved) + '，提前 ' + r.base.monthsSaved + ' 个月还清（按首笔有月供和利率的贷款）。</div>';
+  var pts = r.base.path.filter(function (x, i) { return i % 2 === 1 || i === 0; });
+  h += lineChart(pts.map(function (x) { return x.investable; }), pts.map(function (x) { return String(x.age); }));
+  h += '<table class="tbl"><tr><th>年</th><th>年龄</th><th>可投资资产</th><th>被动收入/月</th><th>必要开支/月</th></tr>' + r.base.path.filter(function (x, i) { return i % 5 === 4 || x.covered && !r.base.path[i - 1].covered; }).slice(0, 9).map(function (x) {
+    return '<tr' + (x.covered ? ' style="color:var(--ok)"' : '') + '><td>' + x.year + '</td><td>' + x.age + '</td><td>' + num(x.investable) + '</td><td>' + num(x.passive) + '</td><td>' + num(x.essential) + '</td></tr>';
+  }).join('') + '</table>';
+  $('scOut').innerHTML = h;
+  $('scLoans').textContent = b.loans.length ? '贷款口径：' + b.loans.map(function (l) { return l.name + ' 余额 ' + num(l.balance) + '、年利率 ' + l.ratePct + '%、月供 ' + num(l.payment); }).join('；') + '。请在账户详情按银行 statement 填余额、利率和月供，模拟才准确。' : '没有填了利率和月供的贷款，提前还款情景无法计算；到账户详情补上。';
+}
+$('scChips').addEventListener('click', function (e) { var b = e.target.closest('[data-sc]'); if (!b) return; scState.key = b.dataset.sc || null; renderScenarios(); });
+['scExp', 'scSave', 'scInv', 'scRet', 'scInfl', 'scSwr', 'scAge', 'scRetire'].forEach(function (id) { $(id).addEventListener('input', renderScenarios); });
+$('scSavePrefs').addEventListener('click', function () {
+  var body = Object.assign({}, prefs(), { returnPct: Number($('scRet').value) || 6, inflationPct: Number($('scInfl').value) || 3, swr: Number($('scSwr').value) || 4, retireAge: Number($('scRetire').value) || 60, birthYear: Number(S.month.slice(0, 4)) - (Number($('scAge').value) || 35) });
+  S.db.collection('settings').doc('prefs').set(body).then(function () { track('scenario_prefs'); toast('已保存假设'); }).catch(function (x) { toast(errText(x)); });
+});
 function renderFi() {
   var r = L.fiCalc({ monthlyExpense: $('fiExp').value, investable: $('fiInv').value, monthlySaving: $('fiSave').value, returnPct: $('fiRet').value });
   $('fiOut').innerHTML = r.target ? '财务自由需要约 <b>' + rm(r.target) + '</b>（年开销 × 25，按 4% 提取），目前完成 <b>' + (r.pct * 100).toFixed(1) + '%</b>。' +

@@ -1269,6 +1269,77 @@
     return out;
   }
 
+  // ---------- scenario simulation ----------
+  // Financial independence (FI) is defined as: under a stated living standard, inflation, return and risk assumptions,
+  // the year from which investable assets can keep paying essential expenses without active income
+  // (passive income = investable × safe withdrawal rate, compared with inflation-adjusted essential expenses).
+  var SCENARIOS = [
+    { key: 'spendLess', name: '每月少花 RM500', apply: function (b) { b.monthlyExpense -= 500; } },
+    { key: 'investMore', name: '每月多投资 RM1,000', apply: function (b) { b.monthlySaving += 1000; b.monthlyExpense -= 0; } },
+    { key: 'prepay', name: '每月多还房贷 RM500', apply: function (b) { b.loanExtra = 500; } },
+    { key: 'incomeDown', name: '收入下降 30%', apply: function (b) { b.monthlyIncome *= 0.7; } },
+    { key: 'marketDown', name: '股市下跌 30%', apply: function (b) { b.investable *= 0.7; } },
+    { key: 'loanDone', name: '贷款结清后释放月供', apply: function (b) { b.loanDoneAtMonth = 1; } },
+    { key: 'child', name: '多一个孩子（每月 +RM1,200，18 年）', apply: function (b) { b.childExtra = 1200; b.childYears = 18; } },
+    { key: 'retireEarly', name: '提前 5 年退休', apply: function (b) { b.retireAge -= 5; } }
+  ];
+  // base = { monthlyIncome, monthlyExpense (essential), monthlySaving (what actually goes to investable each month),
+  //          investable, liquid, loans:[{balance, ratePct, payment, remainingMonths}], retireAge, age, returnPct, inflationPct, swr }
+  function simulate(base, years) {
+    var b = Object.assign({ returnPct: 6, inflationPct: 3, swr: 4, age: 35, retireAge: 60, loans: [], investable: 0, monthlySaving: 0, monthlyExpense: 0, monthlyIncome: 0 }, base);
+    years = years || 30;
+    var r = b.returnPct / 100, infl = b.inflationPct / 100, swr = b.swr / 100;
+    var inv = Math.max(0, b.investable), exp = b.monthlyExpense, loans = (b.loans || []).map(function (l) { return Object.assign({}, l); });
+    var path = [], fiYear = null, interestSaved = 0, monthsSaved = 0;
+    if (b.loanExtra && loans.length) {
+      var l0 = loans[0], simA = prepaySim(l0.balance, l0.ratePct, l0.payment, b.loanExtra);
+      if (simA) { interestSaved = simA.interestSaved; monthsSaved = simA.monthsSaved; }
+    }
+    for (var y = 1; y <= years; y++) {
+      var age = b.age + y, debtMonthly = 0, freed = 0;
+      loans.forEach(function (l) {
+        if (l.balance <= 0) return;
+        var pay = l.payment + (b.loanExtra || 0);
+        for (var m = 0; m < 12 && l.balance > 0; m++) { var it = l.balance * (l.ratePct / 100 / 12); l.balance = Math.max(0, l.balance + it - pay); debtMonthly = pay; }
+        if (l.balance <= 0) freed += l.payment; // instalment freed for the rest of the year(s)
+      });
+      if (b.loanDoneAtMonth) { freed += loans.reduce(function (s, l) { return s + l.payment; }, 0); loans.forEach(function (l) { l.balance = 0; }); b.loanDoneAtMonth = 0; }
+      var extraChild = b.childExtra && y <= (b.childYears || 0) ? b.childExtra : 0;
+      var saving = (age < b.retireAge ? b.monthlySaving : 0) + freed - extraChild;
+      var essential = exp * Math.pow(1 + infl, y) + extraChild;
+      if (age >= b.retireAge) inv = inv * (1 + r) - essential * 12; else inv = inv * (1 + r) + saving * 12;
+      inv = Math.max(0, inv);
+      var passive = inv * swr / 12;
+      var covered = passive >= essential;
+      if (fiYear == null && covered && y >= 1) fiYear = y;
+      path.push({ year: y, age: age, investable: round2(inv), passive: round2(passive), essential: round2(essential), covered: covered });
+    }
+    var retireIdx = Math.max(0, b.retireAge - b.age - 1);
+    var atRetire = path[retireIdx] || path[path.length - 1];
+    return { path: path, fiYear: fiYear, fiAge: fiYear != null ? b.age + fiYear : null, interestSaved: interestSaved, monthsSaved: monthsSaved,
+      retireGap: atRetire ? round2(Math.max(0, atRetire.essential * 12 / swr - atRetire.investable)) : null, assumptions: { returnPct: b.returnPct, inflationPct: b.inflationPct, swr: b.swr, retireAge: b.retireAge } };
+  }
+  // Three return paths for one scenario: conservative / base / optimistic.
+  function simulateBands(base, scenarioKey, years) {
+    var sc = SCENARIOS.filter(function (x) { return x.key === scenarioKey; })[0];
+    var mk = function (ret) { var b = JSON.parse(JSON.stringify(base)); b.returnPct = ret; if (sc) sc.apply(b); return simulate(b, years); };
+    var baseline = simulate(JSON.parse(JSON.stringify(Object.assign({}, base))), years);
+    return { scenario: sc ? sc.name : '基准', conservative: mk((base.returnPct || 6) - 3), base: mk(base.returnPct || 6), optimistic: mk((base.returnPct || 6) + 2), baseline: baseline };
+  }
+  // Family figures → simulation base. essential = fixed commitments + average variable spending (what must be paid).
+  function scenarioBase(d) {
+    var diag = d.diag, al = d.al, p = d.prefs || {}, m = d.month;
+    var tot = familyTotals(d.accounts, d.balances, d.rates, m);
+    var investable = (tot.byCategory['投资'] || 0) + (tot.byCategory['退休金'] || 0) + Math.max(0, tot.liquid - (Number(p.cashBuffer) || 0));
+    var loans = activeAccounts(d.accounts).filter(function (a) { return a.kind === 'liability' && a.group === 'family' && a.monthlyPayment > 0; }).map(function (a) {
+      var lb = loanBalance(a, d.balances, d.tx || [], m);
+      return { name: a.name, balance: lb.estimate != null ? lb.estimate : 0, ratePct: Number(a.rate) || 0, payment: Number(a.monthlyPayment) || 0 };
+    });
+    var age = p.birthYear ? Number(m.slice(0, 4)) - Number(p.birthYear) : 35;
+    return { monthlyIncome: al.income, monthlyExpense: round2(al.fixed + al.variable), monthlySaving: round2(Math.max(0, al.amount)), investable: round2(investable), liquid: round2(tot.liquid),
+      loans: loans, age: age, retireAge: Number(p.retireAge) || 60, returnPct: Number(p.returnPct) || 6, inflationPct: Number(p.inflationPct) || 3, swr: Number(p.swr) || 4 };
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -1300,7 +1371,8 @@
     parseReceipt: parseReceipt, MERCHANT_RULES: MERCHANT_RULES,
     RULES_VERSION: RULES_VERSION, EPF_RIA: EPF_RIA, healthDiagnosis: healthDiagnosis, allocatable: allocatable, allocationPlan: allocationPlan, recurringMonthly: recurringMonthly,
     SAVING_METHODS: SAVING_METHODS, methodByKey: methodByKey, methodSchedule: methodSchedule, methodProgress: methodProgress, roundupAmount: roundupAmount, methodComparison: methodComparison,
-    PYRAMID: PYRAMID, pyramidStatus: pyramidStatus
+    PYRAMID: PYRAMID, pyramidStatus: pyramidStatus,
+    SCENARIOS: SCENARIOS, simulate: simulate, simulateBands: simulateBands, scenarioBase: scenarioBase
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;

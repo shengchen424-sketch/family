@@ -730,4 +730,39 @@ t('knowledge base: every section has a source and check date; tax reliefs carry 
   assert.ok(KB.belanjawanku.households.find(h => h.key === 'couple1').monthly > 5000);
 });
 
+// 21. Scenario simulation
+t('simulate: FI year is when passive income covers inflated essentials; retirement draws down', () => {
+  const base = { monthlyIncome: 10000, monthlyExpense: 4000, monthlySaving: 3000, investable: 200000, age: 35, retireAge: 60, returnPct: 6, inflationPct: 3, swr: 4 };
+  const r = L.simulate(base, 35);
+  assert.strictEqual(r.path.length, 35);
+  assert.ok(r.fiYear > 10 && r.fiYear < 25, 'fi year ' + r.fiYear);
+  assert.ok(r.path[r.fiYear - 1].covered && !r.path[r.fiYear - 2].covered);
+  assert.ok(r.path[0].essential > 4000 && r.path[0].essential < 4200, 'inflation applied');
+  const afterRetire = r.path.find(p => p.age === 61);
+  assert.ok(afterRetire.investable < r.path.find(p => p.age === 60).investable * 1.06, 'drawdown after retirement');
+});
+t('scenarios: spending less brings FI earlier; income drop does not change saving unless modelled; market drop delays; prepay saves interest', () => {
+  const base = { monthlyIncome: 10000, monthlyExpense: 4000, monthlySaving: 3000, investable: 200000, age: 35, retireAge: 60, returnPct: 6, inflationPct: 3, swr: 4, loans: [{ name: '房贷', balance: 300000, ratePct: 4.1, payment: 1800 }] };
+  const b0 = L.simulateBands(base, null, 35);
+  const less = L.simulateBands(base, 'spendLess', 35);
+  assert.ok(less.base.fiYear < b0.baseline.fiYear);
+  const shock = L.simulateBands(base, 'marketDown', 35);
+  assert.ok(shock.base.fiYear == null || shock.base.fiYear >= b0.baseline.fiYear, "a crash delays FI (or pushes it beyond the horizon)");
+  const pre = L.simulateBands(base, 'prepay', 35);
+  assert.ok(pre.base.interestSaved > 10000 && pre.base.monthsSaved > 12, JSON.stringify({ i: pre.base.interestSaved, m: pre.base.monthsSaved }));
+  assert.ok(b0.conservative.fiYear == null || b0.conservative.fiYear >= b0.base.fiYear);
+  assert.ok(b0.optimistic.fiYear <= b0.base.fiYear);
+  const kid = L.simulateBands(base, 'child', 35);
+  assert.ok(kid.base.fiYear == null || kid.base.fiYear >= b0.baseline.fiYear);
+});
+t('scenario base derives from family figures (investable excludes cash buffer, loans need rate+payment)', () => {
+  const diag = L.healthDiagnosis({ accounts: dacc, balances: dbal, rates: {}, tx: dtx, recurring: drec, month: M, prefs: {} });
+  const al = L.allocatable({ tx: dtx, recurring: drec, month: M, prefs: { cashBuffer: 1000 }, liquid: diag.liquid });
+  const b = L.scenarioBase({ diag, al, accounts: dacc, balances: dbal, rates: {}, tx: dtx, month: M, prefs: { cashBuffer: 1000, birthYear: 1990, retireAge: 58 } });
+  assert.strictEqual(b.investable, 78000 + 3000 - 1000);
+  assert.strictEqual(b.age, 36); assert.strictEqual(b.retireAge, 58);
+  assert.strictEqual(b.loans.length, 0, 'card has no payment set');
+  assert.strictEqual(b.monthlyExpense, 2500 + 1500);
+});
+
 console.log('\n' + passed + ' tests passed');
