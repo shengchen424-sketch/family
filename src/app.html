@@ -549,6 +549,13 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       <p class="muted" style="margin-top:8px">版本 <span id="buildId">__BUILD__</span><span id="planInfo"></span></p>
     </div>
 
+    <div class="panel" id="dangerPanel" hidden>
+      <h2>删除全部数据</h2>
+      <p class="muted">删除这个家庭的所有账户、流水、收据、备份。不可恢复。只有 owner 可以操作，输入 DELETE 确认。</p>
+      <div class="form"><label>确认文字<input id="delConfirm" type="text" autocomplete="off" placeholder="DELETE"></label></div>
+      <div class="acts" style="justify-content:flex-start"><button class="btn danger" id="delFamilyBtn">删除本家庭全部数据</button></div>
+    </div>
+
     <div class="panel">
       <h2>安装到手机</h2>
       <p class="muted" id="installHint">Android Chrome：菜单 → “添加到主屏幕”或“安装应用”。iPhone Safari：分享 → “添加到主屏幕”。安装后像普通 App 一样打开，离线也能打开页面。</p>
@@ -588,6 +595,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
       <label>分类<input id="aCat" type="text" maxlength="30" list="catNames"><datalist id="catNames"><option value="现金与定存"><option value="投资"><option value="保险"><option value="房产"><option value="车辆"><option value="退休金"><option value="房贷"><option value="车贷"><option value="个人贷款"><option value="企业现金"><option value="企业透支"></datalist></label>
       <label>归属<select id="aGroup"><option value="family">家庭</option><option value="business">企业（不计入家庭）</option></select></label>
       <label>排序（小的在前）<input id="aSort" type="number" step="1" inputmode="numeric"></label>
+      <label>可见范围<select id="aPrivate"><option value="">全家可见</option><option value="me">仅我自己和 owner 可见（私人账户）</option></select></label>
       <label><span id="aAmtLabel">余额</span><input id="aAmt" type="number" step="0.01" inputmode="decimal"></label>
       <label>截至日期<input id="aAsOf" type="date"></label>
       <label class="full">备注<input id="aNote" type="text" maxlength="120"></label>
@@ -844,6 +852,8 @@ function memberName(id) {
   var m = S.members[id]; return m ? m.name : (id || '未指定');
 }
 function prefs() { return S.settings.prefs || {}; }
+// Anonymous usage counters (event names only, never amounts or text); used to measure activation and retention.
+function track(ev) { try { if (window.Api && window.Api.call) window.Api.call('track', ev).catch(function () {}); } catch (e) {} }
 function errText(e) {
   var map = { invalid_argument: '数据格式有误或没有权限', quota_exceeded: '存储已满，请联系管理员', resource_exhausted: '操作太频繁，请稍后再试', revoked: '没有写入权限', not_granted: '没有数据权限，请重新打开页面' };
   return map[e && e.code] || '保存失败，请重试';
@@ -1168,7 +1178,7 @@ async function wizSave() {
     jobs.push(S.db.collection('settings').doc('prefs').set(merged));
     jobs.push(S.db.collection('settings').doc('onboarding').set(b.settings.onboarding));
     for (var i = 0; i < jobs.length; i += 8) await Promise.all(jobs.slice(i, i + 8));
-    audit('新手设置', S.month, Object.keys(b.accounts).length + ' 个账户');
+    audit('新手设置', S.month, Object.keys(b.accounts).length + ' 个账户'); track('onboarding_done');
     closeSheets(); W = null; wizDraftClear();
     toast('设置完成，欢迎使用');
     showTab('overview');
@@ -1237,7 +1247,7 @@ async function saveBatch() {
         return S.db.collection('balances').doc(S.month + '__' + x.id).set({ month: S.month, asOf: asOf, accountId: x.id, amount: x.amount, currency: a.currency, note: '', byId: S.uid, updatedAt: now });
       }));
     }
-    audit('批量更新余额', S.month, todo.length + ' 个账户');
+    audit('批量更新余额', S.month, todo.length + ' 个账户'); track('balances_batch');
     closeSheets(); toast('已更新 ' + todo.length + ' 个账户');
   } catch (e) { toast(errText(e)); }
   finally { $('bSave').disabled = false; }
@@ -1274,7 +1284,7 @@ async function saveGoal() {
   if (!(body.target > 0)) return toast('目标金额必须大于 0');
   try {
     if (S.editGoalId) await S.db.collection('goals').doc(S.editGoalId).set(body); else await S.db.collection('goals').add(body);
-    audit('保存目标', S.editGoalId || '', body.name + ' ' + rm(body.target));
+    audit('保存目标', S.editGoalId || '', body.name + ' ' + rm(body.target)); track('goal');
     closeSheets(); toast('已保存');
   } catch (e) { toast(errText(e)); }
 }
@@ -1479,6 +1489,7 @@ function restoreBackup(e) {
 // ---------- login ----------
 function showLogin(msg) {
   $('notice').hidden = true;
+  track('open');
   $('login').hidden = false;
   $('loginHint').textContent = msg || '';
   setTimeout(function () { $('loginKey').focus(); }, 50);
@@ -1511,7 +1522,7 @@ function renderBalances() {
         sub += nm == null ? ' · 月供不够付利息' : ' · 约 ' + nm + ' 个月还清';
       }
     }
-    return '<li><button class="row" data-act="open-acc" data-id="' + esc(a.id) + '"><span class="n"><b>' + esc(a.name) + '</b><small>' + esc(sub) + '</small></span>' +
+    return '<li><button class="row" data-act="open-acc" data-id="' + esc(a.id) + '"><span class="n"><b>' + esc(a.name) + (a.private ? ' <span class="tag">私人</span>' : '') + '</b><small>' + esc(sub) + '</small></span>' +
       '<span class="v"><b>' + val + '</b><span class="st ' + r.status + '">' + esc(label) + '</span></span></button></li>';
   }
   var assets = rows.filter(function (r) { return r.acc.group === 'family' && r.acc.kind === 'asset'; });
@@ -1653,6 +1664,7 @@ async function saveEntry() {
       tx.createdAt = now; tx.updatedAt = now; tx.byId = S.uid;
       var ref = await S.db.collection('tx').add(tx);
       audit('新增流水', ref.id, summaryOf(tx));
+      track(Object.keys(S.tx).length <= 1 ? 'first_tx' : 'tx'); if (tx.receiptId) track('receipt');
       resetEntry(false);
       toast('已记录');
     }
@@ -2111,6 +2123,7 @@ function openAcc(id) {
   $('aTitle').textContent = a.name;
   $('aMeta').textContent = GROUP_LABEL[a.group] + ' · ' + KIND_LABEL[a.kind] + ' · ' + a.currency + (a.category ? ' · ' + a.category : '');
   $('aName').value = a.name; $('aCat').value = a.category || ''; $('aGroup').value = a.group || 'family'; $('aSort').value = a.sort || 0;
+  $('aPrivate').value = a.private ? 'me' : '';
   $('aAmtLabel').textContent = a.currency + ' 原币余额（' + S.month + '）' + (a.kind === 'liability' ? '，负债请填正数' : '');
   $('aAmt').value = b ? b.amount : '';
   $('aAsOf').value = b && b.month === S.month ? (b.asOf || b.month + '-01') : (S.month === L.nowMonth() ? L.todayKuching() : L.dateInMonth(S.month, 31));
@@ -2169,8 +2182,8 @@ async function saveAcc() {
   var name = $('aName').value.trim(); if (!name) return toast('请输入名称');
   var body = { month: S.month, asOf: asOf, accountId: a.id, amount: val, currency: a.currency, note: $('aNote').value.trim(), byId: S.uid, updatedAt: new Date().toISOString() };
   try {
-    var meta = { name: name, category: $('aCat').value.trim(), group: $('aGroup').value, sort: Number($('aSort').value) || 0 };
-    if (meta.name !== a.name || meta.category !== (a.category || '') || meta.group !== a.group || meta.sort !== (a.sort || 0)) {
+    var meta = { name: name, category: $('aCat').value.trim(), group: $('aGroup').value, sort: Number($('aSort').value) || 0, private: $('aPrivate').value === 'me' ? (a.private || S.uid) : null };
+    if (meta.name !== a.name || meta.category !== (a.category || '') || meta.group !== a.group || meta.sort !== (a.sort || 0) || (meta.private || null) !== (a.private || null)) {
       await S.db.collection('accounts').doc(a.id).update(meta);
       audit('修改账户', a.id, a.name + ' → ' + meta.name + ' · ' + meta.category);
     }
@@ -2235,6 +2248,7 @@ function renderSettings() {
   var meNow = window.Api && window.Api.me ? window.Api.me() : null;
   $('seedPanel').hidden = Object.keys(S.accounts).length > 0 || !!(meNow && meNow.family && meNow.family !== 'default');
   $('restoreLbl').hidden = !(window.Api && window.Api.isOwner());
+  $('dangerPanel').hidden = !(window.Api && window.Api.isOwner());
   var who = window.Api && window.Api.me ? window.Api.me() : null;
   $('planInfo').textContent = who && who.plan ? ' · ' + (who.plan.tier === 'pro' ? '完整版' : '免费版（最多 8 个账户，无收据照片）') + (who.family && who.family !== 'default' ? ' · 家庭 ' + who.family : '') : '';
   $('healthList').innerHTML = L.healthCheck({ accounts: S.accounts, balances: S.balances, tx: txArr(), recurring: recArr(), goals: arr(S.goals), categories: catList(), month: S.month })
@@ -2457,7 +2471,7 @@ async function runImport() {
       done += chunk.length;
       $('importSum').textContent = '正在导入… ' + done + ' / ' + bodies.length;
     }
-    audit(S.pdf ? 'PDF 导入' : 'CSV 导入', accName(acc), '导入 ' + bodies.length + ' 笔');
+    audit(S.pdf ? 'PDF 导入' : 'CSV 导入', accName(acc), '导入 ' + bodies.length + ' 笔'); track('import');
     $('importSum').textContent = '已导入 ' + bodies.length + ' 笔。';
     $('prev').hidden = true;
     S.csvCands = null;
@@ -2705,6 +2719,15 @@ $('mPrev').addEventListener('click', function () { S.month = L.addMonths(S.month
 $('mNext').addEventListener('click', function () { S.month = L.addMonths(S.month, 1); render(); });
 $('shareBtn').addEventListener('click', shareSummary);
 $('helpBtn').addEventListener('click', function () { $('helpSheet').hidden = false; });
+$('delFamilyBtn').addEventListener('click', function () {
+  if ($('delConfirm').value.trim() !== 'DELETE') return toast('请先输入 DELETE');
+  armOrRun('del-family', async function () {
+    await window.Api.call('deleteFamilyData', 'DELETE');
+    if (window.FamilyKey) window.FamilyKey.clear();
+    location.href = '/logout';
+  });
+  $('delFamilyBtn').textContent = S.arm === 'del-family' ? '再点一次确认删除' : '删除本家庭全部数据';
+});
 $('srvRestoreBtn').addEventListener('click', function () {
   var day = $('srvBackupDay').value; if (!day) return;
   armOrRun('restore:' + day, async function () {

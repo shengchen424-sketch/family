@@ -7,7 +7,7 @@
       withSuccessHandler: function (f) { ok = f; return r; },
       withFailureHandler: function (f) { bad = f; return r; }
     };
-    ['getMe', 'getSnapshot', 'setDoc', 'delDoc', 'uploadReceipt', 'getReceipt', 'getSeed', 'exportAll', 'importAll', 'listBackups', 'restoreBackup', 'setPlan', 'listFamilies'].forEach(function (fn) {
+    ['getMe', 'getSnapshot', 'setDoc', 'delDoc', 'uploadReceipt', 'getReceipt', 'getSeed', 'exportAll', 'importAll', 'listBackups', 'restoreBackup', 'setPlan', 'listFamilies', 'track', 'usageStats', 'deleteFamilyData'].forEach(function (fn) {
       r[fn] = function () {
         var args = Array.prototype.slice.call(arguments);
         var s = ok, b = bad;

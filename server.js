@@ -28,7 +28,7 @@ function backupDir(fam) { return path.join(famDir(fam), 'backups'); }
 // Plans: a family's settings doc "plan" {tier:'free'|'pro', until}. No doc = pro (self-hosted families are never limited).
 // Billing (Google Play) will call setPlan when it goes live; FREE_LIMITS is what the free tier gets.
 const FREE_LIMITS = { accounts: 8, receipts: false };
-const COLLECTIONS = ['accounts', 'balances', 'rates', 'tx', 'recurring', 'categories', 'members', 'reminders', 'snapshots', 'audit', 'goals', 'settings'];
+const COLLECTIONS = ['accounts', 'balances', 'rates', 'tx', 'recurring', 'categories', 'members', 'reminders', 'snapshots', 'audit', 'goals', 'settings', 'tasks', 'events'];
 const MAX_BODY = 12 * 1024 * 1024;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PAGE = path.join(PUBLIC_DIR, 'index.html');
@@ -183,6 +183,7 @@ function validateDoc(name, d) {
   if (name === 'categories' && (!d.name || !['expense', 'income'].includes(d.type) || !num(d.budget))) throw new Error('分类数据不正确');
   if (name === 'recurring' && (!d.name || !(d.amount > 0) || !Logic.TX_TYPES.includes(d.type))) throw new Error('定期项目数据不正确');
   if (name === 'goals' && (!d.name || !(d.target > 0))) throw new Error('目标数据不正确');
+  if (name === 'tasks' && (!d.title || !d.month)) throw new Error('任务数据不正确');
   if (JSON.stringify(d).length > 20000) throw new Error('记录太大');
 }
 const AUDIT_MAX = 2000;
@@ -191,6 +192,21 @@ function pruneAudit(m) {
   if (ids.length <= AUDIT_MAX) return;
   ids.sort((a, b) => String(m[a].at || '').localeCompare(String(m[b].at || '')));
   ids.slice(0, ids.length - AUDIT_MAX).forEach(id => { delete m[id]; });
+}
+// Accounts marked private (account.private = member id) are visible only to that member and the family owner.
+function hiddenAccounts(ctx) {
+  if (ctx.owner) return new Set();
+  const accs = load(ctx.family, 'accounts');
+  return new Set(Object.keys(accs).filter(id => accs[id].private && accs[id].private !== ctx.me));
+}
+function isHiddenDoc(name, id, d, hidden) {
+  if (!hidden.size || !d) return false;
+  if (name === 'accounts') return hidden.has(id);
+  if (name === 'balances') return hidden.has(d.accountId);
+  if (name === 'tx') return hidden.has(d.account) || hidden.has(d.toAccount) || hidden.has(d.loanId);
+  if (name === 'goals') return hidden.has(d.accountId);
+  if (name === 'recurring') return hidden.has(d.account) || hidden.has(d.loanId);
+  return false;
 }
 function removeReceipt(fam, fileId) {
   if (!/^[a-f0-9]{24}$/.test(String(fileId || ''))) return;
@@ -203,12 +219,50 @@ const API = {
 
   getSnapshot(ctx, names) {
     const out = {};
+    const hidden = hiddenAccounts(ctx);
     (names || COLLECTIONS).forEach(n => {
       assertName(n);
+      if (n === 'events') return; // usage counters are operator-only
       const m = load(ctx.family, n);
-      out[n] = Object.keys(m).map(id => ({ id, data: m[id] }));
+      out[n] = Object.keys(m).filter(id => !isHiddenDoc(n, id, m[id], hidden)).map(id => ({ id, data: m[id] }));
     });
     return out;
+  },
+
+  // Usage events: counts per day per event name, no amounts, no text. Used to measure activation and retention.
+  track(ctx, event) {
+    const name = String(event || '').replace(/[^\w-]/g, '').slice(0, 40);
+    if (!name) return false;
+    return serial(() => {
+      const ev = load(ctx.family, 'events');
+      const day = Logic.todayKuching();
+      const rec = ev[day] = ev[day] || {};
+      rec[name] = (rec[name] || 0) + 1;
+      rec['_members_' + ctx.me] = 1;
+      save(ctx.family, 'events');
+      return true;
+    });
+  },
+  usageStats(ctx) {
+    if (!ctx.operator) throw new Error('只有运营者可以查看');
+    return families().map(f => {
+      const ev = load(f, 'events'), days = Object.keys(ev).sort();
+      const last30 = days.filter(d => d >= Logic.todayKuching().slice(0, 8) || days.length <= 30 || d >= days[Math.max(0, days.length - 30)]);
+      const totals = {}; last30.forEach(d => Object.keys(ev[d]).forEach(k => { if (k[0] !== '_') totals[k] = (totals[k] || 0) + ev[d][k]; }));
+      return { family: f, activeDays30: last30.length, firstDay: days[0] || null, lastDay: days[days.length - 1] || null, events30: totals };
+    });
+  },
+
+  // Owner wipes everything in the family (collections, receipts, backups). The keys stay; the family starts empty.
+  deleteFamilyData(ctx, confirmText) {
+    if (!ctx.owner) throw new Error('只有 ' + OWNERS[ctx.family] + ' 可以删除全部数据');
+    if (confirmText !== 'DELETE') throw new Error('请输入 DELETE 确认');
+    return serial(() => {
+      COLLECTIONS.forEach(n => { cache[ctx.family + '/' + n] = {}; try { fs.unlinkSync(path.join(famDir(ctx.family), n + '.json')); } catch (e) { /* none */ } });
+      fs.rmSync(receiptDir(ctx.family), { recursive: true, force: true });
+      fs.rmSync(backupDir(ctx.family), { recursive: true, force: true });
+      return { deleted: true };
+    });
   },
 
   setDoc(ctx, name, id, data) {
@@ -217,8 +271,12 @@ const API = {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('数据格式不正确');
     validateDoc(name, data);
     if (name === 'settings' && id === 'plan') throw new Error('方案由系统设置');
+    if (name === 'events') throw new Error('请用 track 记录事件');
+    const hidden = hiddenAccounts(ctx);
+    if (isHiddenDoc(name, id, data, hidden) || (name === 'accounts' && hidden.has(id))) throw new Error('这是别人的私人账户');
     return serial(() => {
       const m = load(ctx.family, name);
+      if (name === 'accounts' && m[id] && m[id].private && m[id].private !== ctx.me && !ctx.owner) throw new Error('这是别人的私人账户');
       if (name === 'accounts' && !m[id] && planOf(ctx.family).tier === 'free' && Object.keys(m).length >= FREE_LIMITS.accounts) throw new Error('免费版最多 ' + FREE_LIMITS.accounts + ' 个账户，升级后不限');
       m[id] = data;
       if (name === 'audit') pruneAudit(m);

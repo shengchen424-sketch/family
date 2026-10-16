@@ -5,7 +5,7 @@
   "description": "家庭资产与开销记录（单文件页面 + Node 服务，无第三方依赖）",
   "scripts": {
     "build": "python3 scripts/build.py",
-    "test": "node tests/logic.test.js && node tests/server.test.js",
+    "test": "node tests/logic.test.js && node tests/accounting.test.js && node tests/server.test.js",
     "start": "node server.js"
   },
   "license": "UNLICENSED"

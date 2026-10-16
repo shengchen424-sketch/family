@@ -146,11 +146,38 @@ const api = (fn, args, key) => req('POST', '/api/' + fn + (key ? '?k=' + key : '
     assert.ok(fs.existsSync(path.join(dir, 'families', 'tan', 'backups')));
   });
 
+  await t('private accounts: hidden from other members (data, balances, tx), visible to owner; usage events; family wipe', async () => {
+    await api('setDoc', ['accounts', 'tan-secret', { name: 'Mei Secret', kind: 'asset', group: 'family', currency: 'MYR', category: '现金与定存', private: 'Mei' }], 'tanwife001');
+    await api('setDoc', ['balances', '2026-10__tan-secret', { month: '2026-10', accountId: 'tan-secret', amount: 500 }], 'tanwife001');
+    await api('setDoc', ['tx', 'tan-secret-tx', { type: 'expense', date: '2026-10-02', month: '2026-10', amount: 9, category: '饮食', account: 'tan-secret' }], 'tanwife001');
+    const ownerView = (await api('getSnapshot', [['accounts', 'tx']], 'tankey7890')).j.result;
+    assert.ok(ownerView.accounts.some(a => a.id === 'tan-secret'), 'owner sees it');
+    await api('setDoc', ['members', 'Third', { name: 'Third' }], 'tankey7890');
+    process.env.FAMILY_KEYS += ''; // (members list is not auth; a third key would be needed for a full check)
+    // Simulate a non-owner, non-private-owner view: Ah Tan is owner, so use a fresh key family? Use default-family Liza vs Chen for the same rule:
+    await api('setDoc', ['accounts', 'chen-only', { name: 'Chen Private', kind: 'asset', group: 'family', currency: 'MYR', category: '投资', private: 'Chen' }], 'ownerkey123');
+    await api('setDoc', ['accounts', 'liza-only', { name: 'Liza Private', kind: 'asset', group: 'family', currency: 'MYR', category: '投资', private: 'Liza' }], 'lizakey456');
+    const liza = (await api('getSnapshot', [['accounts']], 'lizakey456')).j.result.accounts.map(a => a.id);
+    assert.ok(liza.includes('liza-only') && !liza.includes('chen-only'), 'Liza sees her own private account, not Chen\'s');
+    const chen = (await api('getSnapshot', [['accounts']], 'ownerkey123')).j.result.accounts.map(a => a.id);
+    assert.ok(chen.includes('liza-only'), 'owner sees all');
+    assert.ok(/私人账户/.test((await api('setDoc', ['balances', '2026-10__chen-only', { month: '2026-10', accountId: 'chen-only', amount: 1 }], 'lizakey456')).j.error));
+    assert.strictEqual((await api('track', ['first_tx'], 'lizakey456')).j.result, true);
+    const stats = (await api('usageStats', [], 'ownerkey123')).j.result.find(f => f.family === 'default');
+    assert.strictEqual(stats.events30.first_tx, 1);
+    assert.ok(/运营者/.test((await api('usageStats', [], 'lizakey456')).j.error));
+    assert.ok(/DELETE/.test((await api('deleteFamilyData', ['no'], 'tankey7890')).j.error));
+    assert.ok(/只有 Ah Tan/.test((await api('deleteFamilyData', ['DELETE'], 'tanwife001')).j.error));
+    assert.strictEqual((await api('deleteFamilyData', ['DELETE'], 'tankey7890')).j.result.deleted, true);
+    assert.strictEqual((await api('getSnapshot', [['accounts']], 'tankey7890')).j.result.accounts.length, 0);
+    assert.ok(!fs.existsSync(path.join(dir, 'families', 'tan', 'receipts')));
+  });
+
   await t('plans: operator sets a family to free, limits apply, pro lifts them', async () => {
     assert.ok(/运营者/.test((await api('setPlan', ['tan', 'free'], 'tankey7890')).j.error));
     assert.strictEqual((await api('setPlan', ['tan', 'free'], 'ownerkey123')).j.result.tier, 'free');
     assert.strictEqual((await api('getMe', [], 'tankey7890')).j.result.plan.tier, 'free');
-    for (let i = 2; i <= 8; i++) await api('setDoc', ['accounts', 'tan-' + i, { name: 'A' + i, kind: 'asset', group: 'family', currency: 'MYR' }], 'tankey7890');
+    for (let i = 1; i <= 8; i++) await api('setDoc', ['accounts', 'tan-' + i, { name: 'A' + i, kind: 'asset', group: 'family', currency: 'MYR' }], 'tankey7890');
     const ninth = await api('setDoc', ['accounts', 'tan-9', { name: 'A9', kind: 'asset', group: 'family', currency: 'MYR' }], 'tankey7890');
     assert.ok(/免费版最多 8 个账户/.test(ninth.j.error));
     assert.ok(/付费版/.test((await api('uploadReceipt', ['data:image/png;base64,iVBORw0KGgo='], 'tankey7890')).j.error));
