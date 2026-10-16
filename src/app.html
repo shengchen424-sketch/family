@@ -976,7 +976,7 @@ function shareSummary() {
 function renderOverview() {
   var m = S.month, txs = txArr();
   $('welcome').hidden = Object.keys(S.accounts).length > 0;
-  renderPlan();
+  renderActionPlan();
   $('nextSteps').hidden = !(Object.keys(S.accounts).length > 0 && !txs.length);
   var t = L.familyTotals(S.accounts, S.balances, S.rates, m);
   var biz = L.businessTotals(S.accounts, S.balances, S.rates, m);
@@ -1364,7 +1364,7 @@ function ensureTasks(plan) {
     S.db.collection('tasks').doc(t.id).set({ month: S.month, key: t.key, title: t.title, amount: t.amount, reason: t.reason, kind: t.kind, order: i, status: 'open', rules: plan.version, createdAt: new Date().toISOString() }).catch(function () {});
   });
 }
-function renderPlan() {
+function renderActionPlan() {
   var hasData = Object.keys(S.accounts).length > 0;
   $('planBox').hidden = !hasData; $('healthBox').hidden = !hasData;
   if (!hasData) return;
