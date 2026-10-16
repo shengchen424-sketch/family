@@ -222,6 +222,7 @@
       t.principal = Number(r.principal) || 0;
       t.interest = Number(r.interest) || 0;
     }
+    if (r.type === 'transfer') t.toAccount = r.toAccount || null;
     return t;
   }
 
