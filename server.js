@@ -103,8 +103,10 @@ function keyFromRequest(req, url) {
   if (cookie) { try { v = decodeURIComponent(cookie.slice(2)); } catch (e) { v = null; } }
   if (v && KEYS[v]) return v;
   if (q || v) noteFail(clientIp(req));
+  if (v && !q) req.staleCookie = true; // old cookie after a key change: tell the browser to drop it
   return null;
 }
+const CLEAR_COOKIE = 'k=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0';
 
 // ---------- document store (one JSON file per collection, written atomically) ----------
 const cache = {};
@@ -301,6 +303,7 @@ async function handle(req, res) {
     // A valid ?k= is remembered in a cookie (no redirect: some phone browsers drop cookies set on a redirect);
     // the page also keeps the key in localStorage and passes ?k= on API calls, so cookies are optional.
     const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' };
+    if (req.staleCookie) headers['Set-Cookie'] = CLEAR_COOKIE;
     if (key && url.searchParams.get('k')) {
       headers['Set-Cookie'] = 'k=' + encodeURIComponent(key) + '; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=31536000';
     }
@@ -338,7 +341,7 @@ async function handle(req, res) {
   }
 
   if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
-    if (!key) return send(res, 403, JSON.stringify({ ok: false, error: '未授权', code: 'unauthorized' }), { 'Content-Type': 'application/json' });
+    if (!key) return send(res, 403, JSON.stringify({ ok: false, error: '未授权', code: 'unauthorized' }), Object.assign({ 'Content-Type': 'application/json' }, req.staleCookie ? { 'Set-Cookie': CLEAR_COOKIE } : {}));
     const fn = url.pathname.slice(5);
     if (!Object.prototype.hasOwnProperty.call(API, fn)) return send(res, 404, JSON.stringify({ ok: false, error: '未知函数' }), { 'Content-Type': 'application/json' });
     try {

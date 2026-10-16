@@ -50,6 +50,15 @@ const api = (fn, args, key) => req('POST', '/api/' + fn + (key ? '?k=' + key : '
     assert.strictEqual(JSON.parse(viaCookie.body).result.name, 'Liza');
   });
 
+  await t('a stale cookie (old key) is cleared by the server so it does not keep counting as a wrong key', async () => {
+    const r = await req('POST', '/api/getMe', { args: [] }, { cookie: 'k=oldkey000' });
+    assert.strictEqual(r.status, 403);
+    assert.ok(/Max-Age=0/.test((r.headers['set-cookie'] || [''])[0]));
+    const page = await req('GET', '/', null, { cookie: 'k=oldkey000' });
+    assert.strictEqual(page.status, 200);
+    assert.ok(/Max-Age=0/.test((page.headers['set-cookie'] || [''])[0]));
+  });
+
   await t('logout clears the HttpOnly cookie', async () => {
     const r = await req('GET', '/logout', null, { cookie: 'k=ownerkey123' });
     assert.strictEqual(r.status, 302);

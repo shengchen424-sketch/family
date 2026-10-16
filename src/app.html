@@ -1105,8 +1105,10 @@ async function wizSave() {
       Object.keys(b[col]).forEach(function (id) { if (col === 'members' && S.members[id]) return; jobs.push(S.db.collection(col).doc(id).set(b[col][id])); });
     });
     if (!Object.keys(S.categories).length) Object.keys(b.categories).forEach(function (id) { jobs.push(S.db.collection('categories').doc(id).set(b.categories[id])); });
-    var prefsNow = prefs();
-    jobs.push(S.db.collection('settings').doc('prefs').set(Object.assign({}, prefsNow, b.settings.prefs, prefsNow.monthlyBudget && !b.settings.prefs.monthlyBudget ? { monthlyBudget: prefsNow.monthlyBudget } : {})));
+    var merged = Object.assign({}, prefs());
+    if (b.settings.prefs.monthlyBudget > 0) merged.monthlyBudget = b.settings.prefs.monthlyBudget;
+    if (!(merged.emergencyMonths > 0)) merged.emergencyMonths = 6;
+    jobs.push(S.db.collection('settings').doc('prefs').set(merged));
     jobs.push(S.db.collection('settings').doc('onboarding').set(b.settings.onboarding));
     for (var i = 0; i < jobs.length; i += 8) await Promise.all(jobs.slice(i, i + 8));
     audit('新手设置', S.month, Object.keys(b.accounts).length + ' 个账户');
