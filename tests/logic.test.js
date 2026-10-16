@@ -591,4 +591,53 @@ t('receipt: OCR noise, RM prefixes, thousands separators, income keywords', () =
   assert.strictEqual(L.parseReceipt('Agrijoy Sdn Bhd\nPAYMENT RECEIVED\nAmount 4,000.00').type, 'income');
 });
 
+// 18. Action loop
+const dacc = {
+  pbb: { id: 'pbb', name: 'PBB', kind: 'asset', group: 'family', category: '现金与定存', currency: 'MYR', active: true },
+  card: { id: 'card', name: 'Visa', kind: 'liability', group: 'family', category: '信用卡', currency: 'MYR', active: true },
+  epf: { id: 'epf', name: 'EPF', kind: 'asset', group: 'family', category: '退休金', currency: 'MYR', active: true }
+};
+const dbal = { a: { month: M, accountId: 'pbb', amount: 3000, currency: 'MYR' }, b: { month: M, accountId: 'card', amount: 1500, currency: 'MYR' }, c: { month: M, accountId: 'epf', amount: 78000, currency: 'MYR' } };
+const dtx = [];
+['2026-08', '2026-09', M].forEach(x => { dtx.push({ type: 'income', month: x, amount: 8000, category: '工资' }); dtx.push({ type: 'expense', month: x, amount: 4000, category: '饮食' }); });
+const drec = [{ type: 'income', amount: 8000, active: true }, { type: 'expense', amount: 1500, active: true }, { type: 'repayment', amount: 1000, interest: 300, active: true }];
+t('health diagnosis: six dimensions with scores and an index', () => {
+  const h = L.healthDiagnosis({ accounts: dacc, balances: dbal, rates: {}, tx: dtx, recurring: drec, month: M, prefs: { lifeCover: 0, birthYear: 1990 } });
+  const by = Object.fromEntries(h.dims.map(x => [x.key, x]));
+  assert.strictEqual(by.cashflow.score, 100, 'savings rate 50%');
+  assert.ok(by.liquidity.value > 0.7 && by.liquidity.value < 0.8, 'liquid 3000 / expense 4000');
+  assert.strictEqual(by.liquidity.score, 10);
+  assert.ok(by.debt.score <= 50 && /高息债务/.test(by.debt.text), 'credit card balance caps debt score');
+  assert.strictEqual(by.cover.score, 30, 'cover not filled');
+  assert.ok(by.retire.score > 50, 'EPF 78k vs expected for age 36');
+  assert.strictEqual(by.growth.score, null, 'no trend yet');
+  assert.ok(h.index > 0 && h.index <= 100);
+  assert.deepStrictEqual(h.highCost.map(a => a.id), ['card']);
+});
+t('allocatable cash = recurring income − fixed − typical variable spending', () => {
+  const a = L.allocatable({ tx: dtx, recurring: drec, month: M });
+  assert.strictEqual(a.income, 8000); assert.strictEqual(a.fixed, 2500);
+  assert.strictEqual(a.variable, 1500, 'avg expense 4000 minus fixed 2500');
+  assert.strictEqual(a.amount, 4000);
+  assert.strictEqual(L.allocatable({ tx: dtx, recurring: [], month: M }).income, 8000, 'falls back to average income');
+});
+t('allocation plan: emergency first, then debt, then long-term, then goals; amounts sum to input', () => {
+  const h = L.healthDiagnosis({ accounts: dacc, balances: dbal, rates: {}, tx: dtx, recurring: drec, month: M, prefs: {} });
+  const plan = L.allocationPlan(h, 4000, [{ id: 'g1', name: '日本旅行', perMonth: 500, targetMonth: '2027-06' }], M);
+  const keys = plan.tasks.map(t => t.key);
+  assert.strictEqual(keys[0], 'emergency'); assert.strictEqual(keys[1], 'debt'); assert.ok(keys.includes('retire')); assert.ok(keys.includes('goal:g1'));
+  assert.strictEqual(plan.tasks.reduce((s, t) => s + t.amount, 0), 4000);
+  assert.ok(plan.tasks.every(t => t.amount % 10 === 0 && t.id.startsWith(M + '__')));
+  assert.strictEqual(plan.version, 'v1');
+  assert.strictEqual(L.allocationPlan(h, 0, [], M).tasks.length, 0);
+});
+t('allocation plan: healthy family gets long-term + free money only', () => {
+  const bal2 = { a: { month: M, accountId: 'pbb', amount: 40000, currency: 'MYR' }, c: { month: M, accountId: 'epf', amount: 200000, currency: 'MYR' } };
+  const acc2 = { pbb: dacc.pbb, epf: dacc.epf };
+  const h = L.healthDiagnosis({ accounts: acc2, balances: bal2, rates: {}, tx: dtx, recurring: drec, month: M, prefs: { lifeCover: 2000000 } });
+  const plan = L.allocationPlan(h, 3000, [], M);
+  assert.deepStrictEqual(plan.tasks.map(t => t.key), ['retire', 'free']);
+  assert.strictEqual(plan.tasks[0].amount, 900);
+});
+
 console.log('\n' + passed + ' tests passed');

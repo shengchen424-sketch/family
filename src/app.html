@@ -173,6 +173,21 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .ins i.ok{background:var(--ok)}.ins i.warn{background:var(--warn)}
 .toast.err{background:var(--neg);color:#fff}
 .bar-fill.goal{background:var(--biz)}
+body.lite #ovCats,body.lite #flows,body.lite #insightBox{display:none}
+body.lite .nav [data-tab="ledger"]{display:none}
+.plan{background:var(--surface);border:1px solid var(--accent);border-radius:12px;padding:14px;margin-bottom:12px}
+.plan .big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent);margin:2px 0}
+.plan .lbl{font-size:12px;color:var(--muted)}
+.plan .task{border-top:1px solid var(--line);padding:10px 0 4px;margin-top:10px}
+.plan .task b{font-size:15px}
+.plan .task p{margin:4px 0 8px;font-size:13px;color:var(--muted)}
+.hscore{display:flex;align-items:center;gap:12px}
+.hscore .ring{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;color:var(--accent-ink);background:var(--accent);flex-shrink:0}
+.hscore .ring.mid{background:var(--warn)}.hscore .ring.low{background:var(--neg)}
+.dims{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
+.dims div{font-size:11.5px;color:var(--muted);text-align:center}
+.dims b{display:block;font-size:14px;color:var(--ink)}
+.dims .bar-track{margin-top:3px}
 .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;margin-bottom:10px}
 .cal .hd{font-size:11px;color:var(--muted);text-align:center;padding:2px 0}
 .cal button{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:5px 2px;min-height:48px;display:flex;flex-direction:column;align-items:center;gap:1px;cursor:pointer;min-width:0}
@@ -269,6 +284,8 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
         <li>月底到「余额 → 本月批量更新」更新一次各账户余额</li>
       </ol>
     </div>
+    <div class="plan" id="planBox" hidden></div>
+    <div class="panel" id="healthBox" hidden></div>
     <section class="cards" id="cards"></section>
     <div class="acts" style="justify-content:flex-start;margin:-4px 0 12px"><button class="btn small" id="shareBtn">分享本月小结</button></div>
     <div class="panel" id="budgetBox"></div>
@@ -580,6 +597,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
         <label>每月总预算（RM，0 = 用各分类预算之和）<input id="setBudget" type="number" step="1" inputmode="decimal"></label>
         <label>紧急备用金目标（月数）<input id="setEmerg" type="number" min="1" max="24" inputmode="numeric"></label>
         <label>外观（仅这台设备）<select id="setTheme"><option value="">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
+        <label>使用模式<select id="setMode"><option value="full">完整：平时记每一笔开销</option><option value="lite">轻量：每月更新余额、记收入和大额支出就好</option></select></label>
       </div>
       <div class="acts"><button class="btn primary" id="setSave">保存偏好</button></div>
     </div>
@@ -737,6 +755,19 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
   </div>
 </div>
 
+<!-- Health detail -->
+<div class="sheet" id="healthSheet" hidden>
+  <div class="panelbox" role="dialog" aria-modal="true">
+    <div class="ph"><div><h2>财务健康诊断</h2><div class="muted" id="hsMeta"></div></div><button class="btn small" data-close>关闭</button></div>
+    <div id="hsBody"></div>
+    <div class="form" style="margin-top:12px">
+      <label>出生年份（算退休进度，可空）<input id="hsBirth" type="number" min="1940" max="2010" inputmode="numeric"></label>
+      <label>全家人寿保额合计（RM）<input id="hsCover" type="number" inputmode="decimal"></label>
+    </div>
+    <div class="acts"><button class="btn primary" id="hsSave">保存</button></div>
+  </div>
+</div>
+
 <!-- Help -->
 <div class="sheet" id="helpSheet" hidden>
   <div class="panelbox help" role="dialog" aria-modal="true">
@@ -827,7 +858,7 @@ var KIND_LABEL = { asset: '资产', liability: '负债' };
 
 var S = {
   db: null, user: null, uid: null, downloads: null,
-  accounts: {}, balances: {}, rates: {}, tx: {}, recurring: {}, categories: {}, members: {}, reminders: {}, snapshots: {}, goals: {}, settings: {}, audit: [],
+  accounts: {}, balances: {}, rates: {}, tx: {}, recurring: {}, categories: {}, members: {}, reminders: {}, snapshots: {}, goals: {}, settings: {}, tasks: {}, audit: [],
   editGoalId: null, editMemId: null,
   month: L.nowMonth(), tab: 'overview',
   entryType: 'expense', editTxId: null, editAccId: null, editRecId: null, editCatId: null, editRemId: null,
@@ -945,6 +976,7 @@ function shareSummary() {
 function renderOverview() {
   var m = S.month, txs = txArr();
   $('welcome').hidden = Object.keys(S.accounts).length > 0;
+  renderPlan();
   $('nextSteps').hidden = !(Object.keys(S.accounts).length > 0 && !txs.length);
   var t = L.familyTotals(S.accounts, S.balances, S.rates, m);
   var biz = L.businessTotals(S.accounts, S.balances, S.rates, m);
@@ -1308,10 +1340,88 @@ async function saveMember() {
   } catch (e) { toast(errText(e)); }
 }
 async function savePrefs() {
-  var body = Object.assign({}, prefs(), { monthlyBudget: round2(Number($('setBudget').value) || 0), emergencyMonths: Math.min(24, Math.max(1, Number($('setEmerg').value) || 6)), updatedAt: new Date().toISOString() });
+  var body = Object.assign({}, prefs(), { monthlyBudget: round2(Number($('setBudget').value) || 0), emergencyMonths: Math.min(24, Math.max(1, Number($('setEmerg').value) || 6)), mode: $('setMode').value, updatedAt: new Date().toISOString() });
   try { await S.db.collection('settings').doc('prefs').set(body); audit('保存偏好', 'prefs', '预算 ' + body.monthlyBudget); toast('已保存'); }
   catch (e) { toast(errText(e)); }
 }
+
+// ---------- action loop: diagnosis → allocatable → plan → tasks ----------
+function diagNow() {
+  return L.healthDiagnosis({ accounts: S.accounts, balances: S.balances, rates: S.rates, tx: txArr(), recurring: recArr(), month: S.month, prefs: prefs(), snapshots: S.snapshots });
+}
+function goalsForPlan() {
+  return arr(S.goals).map(function (g) { var p = L.goalProgress(g, S.accounts, S.balances, S.rates, S.month); return { id: g.id, name: g.name, perMonth: p.perMonth || 0, targetMonth: g.targetMonth, done: p.done }; });
+}
+function monthTasks() { return arr(S.tasks).filter(function (t) { return t.month === S.month; }).sort(function (a, b) { return (a.order || 0) - (b.order || 0); }); }
+// Create this month's tasks once (ids are deterministic: month__rule), so re-rendering never duplicates them.
+function ensureTasks(plan) {
+  if (S._tasksEnsured === S.month || !S.ready || !Object.keys(S.accounts).length) return;
+  var existing = monthTasks();
+  if (existing.length) { S._tasksEnsured = S.month; return; }
+  if (!plan.tasks.length) return;
+  S._tasksEnsured = S.month;
+  plan.tasks.forEach(function (t, i) {
+    S.db.collection('tasks').doc(t.id).set({ month: S.month, key: t.key, title: t.title, amount: t.amount, reason: t.reason, kind: t.kind, order: i, status: 'open', rules: plan.version, createdAt: new Date().toISOString() }).catch(function () {});
+  });
+}
+function renderPlan() {
+  var hasData = Object.keys(S.accounts).length > 0;
+  $('planBox').hidden = !hasData; $('healthBox').hidden = !hasData;
+  if (!hasData) return;
+  var diag = diagNow(), al = L.allocatable({ tx: txArr(), recurring: recArr(), month: S.month });
+  var plan = L.allocationPlan(diag, al.amount, goalsForPlan(), S.month);
+  ensureTasks(plan);
+  var tasks = monthTasks(), open = tasks.filter(function (t) { return t.status === 'open'; }), done = tasks.filter(function (t) { return t.status === 'done'; });
+  var next = open[0];
+  var h = '<div class="lbl">我的家庭财务计划 · ' + S.month + '</div>';
+  h += '<div class="lbl" style="margin-top:8px">本月预计可分配金额</div><div class="big">' + rm(al.amount) + '</div>';
+  h += '<div class="lbl">' + (al.basis === 'recurring' ? '定期收入' : '近 3 个月平均收入') + ' ' + num(al.income) + ' − 固定支出与月供 ' + num(al.fixed) + ' − 平均其他开销 ' + num(al.variable) + (al.amount === 0 ? ' · 没有余钱时先看固定支出' : '') + '</div>';
+  if (next) {
+    h += '<div class="task"><div class="lbl">你的下一个重要行动</div><b>' + esc(next.title) + ' · ' + rm(next.amount) + '</b><p>' + esc(next.reason) + '</p>' +
+      '<div class="acts" style="justify-content:flex-start;margin:0"><button class="btn primary small" data-task="done" data-id="' + esc(next.id) + '">已完成</button><button class="btn small" data-task="skip" data-id="' + esc(next.id) + '">这个月跳过</button></div></div>';
+  } else if (tasks.length) {
+    h += '<div class="task"><b>本月行动都处理完了 🎉</b><p>下个月 1 号会按新的数据重新生成。</p></div>';
+  } else {
+    h += '<div class="task"><b>还没有可分配的钱</b><p>' + esc(plan.note || '先补上收入与固定支出的定期项目，系统才能算出每月能安排多少。') + '</p><div class="acts" style="justify-content:flex-start;margin:0"><button class="btn small" data-act="new-rec">添加定期收入/支出</button></div></div>';
+  }
+  if (tasks.length) {
+    h += '<div class="lbl" style="margin-top:10px">本月财务进展 · ' + done.length + ' 项已完成，' + open.length + ' 项待处理</div>';
+    h += '<div class="bar-track"><div class="bar-fill" style="width:' + (tasks.length ? done.length / tasks.length * 100 : 0).toFixed(0) + '%"></div></div>';
+    h += '<ul class="hist">' + tasks.map(function (t) { return '<li><span>' + (t.status === 'done' ? '✅ ' : t.status === 'skipped' ? '⏭ ' : '⬜ ') + esc(t.title) + '</span><span>' + rm(t.amount) + '</span></li>'; }).join('') + '</ul>';
+  }
+  $('planBox').innerHTML = h;
+  var cls = diag.index == null ? '' : diag.index >= 70 ? '' : diag.index >= 45 ? 'mid' : 'low';
+  $('healthBox').innerHTML = '<button class="row" id="healthOpen" style="padding:0"><span class="hscore" style="width:100%"><span class="ring ' + cls + '">' + (diag.index == null ? '—' : diag.index) + '</span><span class="n"><b>财务健康指数</b><small>' + (diag.index == null ? '补上收入、支出和保额后可计算' : diag.index >= 70 ? '整体稳健，继续保持' : diag.index >= 45 ? '有几个地方要补强，点开看' : '先处理最弱的一项，点开看') + '</small></span><span class="v">›</span></span></button>' +
+    '<div class="dims">' + diag.dims.map(function (x) { return '<div>' + esc(x.name) + '<b>' + (x.score == null ? '—' : x.score) + '</b><div class="bar-track"><div class="bar-fill ' + (x.score != null && x.score < 45 ? 'over' : x.score != null && x.score < 70 ? 'warn' : '') + '" style="width:' + (x.score || 0) + '%"></div></div></div>'; }).join('') + '</div>';
+}
+function openHealth() {
+  var diag = diagNow();
+  $('hsMeta').textContent = '指数 ' + (diag.index == null ? '—' : diag.index + ' / 100') + ' · 规则 ' + L.RULES_VERSION + ' · 按 ' + S.month + ' 数据';
+  $('hsBody').innerHTML = diag.dims.map(function (x) {
+    return '<div class="trow"><span><b>' + esc(x.name) + '</b> <span class="muted">' + (x.score == null ? '无法计算' : x.score + ' 分') + '</span></span><span class="v"></span><div class="bar-track"><div class="bar-fill ' + (x.score != null && x.score < 45 ? 'over' : x.score != null && x.score < 70 ? 'warn' : '') + '" style="width:' + (x.score || 0) + '%"></div></div><div class="muted" style="grid-column:1/-1">' + esc(x.text) + '<br><span style="color:var(--accent)">怎么做：</span>' + esc(x.hint) + '</div></div>';
+  }).join('');
+  $('hsBirth').value = prefs().birthYear || ''; $('hsCover').value = prefs().lifeCover || '';
+  $('healthSheet').hidden = false;
+}
+async function taskAction(id, action) {
+  var t = S.tasks[id]; if (!t) return;
+  var upd = { status: action === 'done' ? 'done' : 'skipped', doneAt: new Date().toISOString(), by: S.uid };
+  try {
+    await S.db.collection('tasks').doc(id).update(upd);
+    audit(action === 'done' ? '完成行动' : '跳过行动', id, t.title + ' ' + rm(t.amount));
+    track(action === 'done' ? 'task_done' : 'task_skip');
+    toast(action === 'done' ? '记下了，做得好' : '已跳过');
+  } catch (e) { toast(errText(e)); }
+}
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-task]');
+  if (b) return taskAction(b.dataset.id, b.dataset.task);
+  if (e.target.closest('#healthOpen')) return openHealth();
+});
+$('hsSave').addEventListener('click', function () {
+  var body = Object.assign({}, prefs(), { birthYear: Number($('hsBirth').value) || null, lifeCover: Number($('hsCover').value) || 0 });
+  S.db.collection('settings').doc('prefs').set(body).then(function () { closeSheets(); toast('已保存'); }).catch(function (x) { toast(errText(x)); });
+});
 
 // ---------- charts (inline SVG, no library) ----------
 function lineChart(values, labels) {
@@ -2280,6 +2390,7 @@ function renderSettings() {
   }).join('') || '<li class="empty">还没有成员</li>';
   if (document.activeElement !== $('setBudget')) $('setBudget').value = prefs().monthlyBudget || 0;
   if (document.activeElement !== $('setEmerg')) $('setEmerg').value = prefs().emergencyMonths || 6;
+  if (document.activeElement !== $('setMode')) $('setMode').value = prefs().mode === 'lite' ? 'lite' : 'full';
 }
 async function audit(action, ref, summary) {
   try { await S.db.collection('audit').add({ at: new Date().toISOString(), byId: S.uid, action: action, ref: ref || '', summary: summary || '' }); }
@@ -2488,6 +2599,7 @@ function showTab(name) {
   document.querySelectorAll('[data-tab]').forEach(function (b) { b.setAttribute('aria-selected', String(b.dataset.tab === name)); });
   var moreBtn = document.querySelector('#nav [data-more]'); if (moreBtn) moreBtn.setAttribute('aria-selected', String(['report', 'plan', 'settings'].indexOf(name) >= 0));
   document.querySelectorAll('.view').forEach(function (v) { v.hidden = v.id !== 'v-' + name; });
+  if (name === 'balances' && prefs().mode === 'lite' && S._liteJump) { S._liteJump = false; setTimeout(openBatch, 50); }
   if (name === 'ledger' && !S._ledgerOpened) { S._ledgerOpened = true; if (!$('lMonth').value) { $('lMonth').value = S.month; S.ledger.month = S.month; } }
   if (name === 'entry' && !S.editTxId) { fillAll(); setEntryType(S.entryType); if (!$('fDate').value) resetEntry(false); setTimeout(function () { if (!$('fAmt').value) $('fAmt').focus(); }, 60); }
   render();
@@ -2500,7 +2612,14 @@ function render() {
   renderQueued = true;
   requestAnimationFrame(function () { renderQueued = false; renderNow(); });
 }
+function applyMode() {
+  var lite = prefs().mode === 'lite';
+  document.body.classList.toggle('lite', lite);
+  var centre = document.querySelector('#nav .add');
+  if (centre) { centre.dataset.tab = lite ? 'balances' : 'entry'; centre.lastChild.textContent = lite ? '更新' : '记账'; }
+}
 function renderNow() {
+  applyMode();
   renderHeader();
   fillAll();
   var t = S.tab;
@@ -2532,7 +2651,7 @@ document.addEventListener('click', function (e) {
   var chip = e.target.closest('#catChips [data-chip]');
   if (chip) { $('fCat').value = chip.dataset.chip; renderChips(); return; }
   var tabBtn = e.target.closest('[data-tab]');
-  if (tabBtn) { closeSheets(); return showTab(tabBtn.dataset.tab); }
+  if (tabBtn) { closeSheets(); if (tabBtn.classList.contains('add') && prefs().mode === 'lite') S._liteJump = true; return showTab(tabBtn.dataset.tab); }
   if (e.target.closest('[data-more]')) { $('moreSheet').hidden = false; return; }
   var typeBtn = e.target.closest('#typeSeg [data-type]');
   if (typeBtn) { setEntryType(typeBtn.dataset.type); return; }
@@ -2798,7 +2917,7 @@ async function init() {
       render();
     }, function (e) { toast(errText(e)); });
   }
-  ['accounts', 'balances', 'rates', 'tx', 'recurring', 'categories', 'members', 'reminders', 'snapshots', 'goals', 'settings']
+  ['accounts', 'balances', 'rates', 'tx', 'recurring', 'categories', 'members', 'reminders', 'snapshots', 'goals', 'settings', 'tasks']
     .forEach(function (n) { sub(n, n); });
   db.collection('audit').orderBy('at', 'desc').limit(50).onSnapshot(function (s) {
     S.audit = s.docs.filter(function (d) { return d.exists; }).map(function (d) { return d.data(); });
