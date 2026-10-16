@@ -1226,6 +1226,31 @@
     return { before: b, after: a, delta: b != null && a != null ? a - b : null, monthsAfter: after.length, monthsBefore: before.length };
   }
 
+  // ---------- financial pyramid: level status from the diagnosis (learning unlocks progressively; actions never hard-locked) ----------
+  var PYRAMID = [
+    { key: 'protect', name: '必要保障与现金流安全', test: function (d) { return byKey(d, 'cover').score >= 70 && byKey(d, 'cashflow').score >= 25; }, why: '医药卡、人寿保额、正的现金流', cards: ['人寿保额 ≈ 年收入 × 10 + 负债 − 现金', '每人一张医药卡；看年限额、终身限额、等候期', '储蓄率先过 10%，再谈其他'] },
+    { key: 'emergency', name: '应急备用金', test: function (d) { return d.emergencyMonths != null && d.emergencyMonths >= 3; }, why: '可动用现金 ≥ 3 个月开销（目标 6）', cards: ['阶梯：RM1,000 → 1 个月 → 3 个月 → 6 个月', '放定存阶梯或货币市场基金，不放股票', '自雇或单收入家庭建议 9–12 个月'] },
+    { key: 'debt', name: '高成本债务管理', test: function (d) { return !(d.highCost && d.highCost.length) && (byKey(d, 'debt').score == null || byKey(d, 'debt').score >= 70); }, why: '没有信用卡/个人贷款余额，月供 ≤ 35% 收入', cards: ['信用卡 15–18%：任何稳健投资都跑不赢，先还', '雪球（先小额，有成就感）vs 雪崩（先高息，省最多）', '房贷利率差 > 0.5% 可考虑再融资；AKPK 可免费重组'] },
+    { key: 'retire', name: '退休储蓄', test: function (d) { return byKey(d, 'retire').score >= 70; }, why: 'EPF/PRS 进度跟得上年龄', cards: ['KWSP 三档：基本 RM390k、适足 RM650k、充裕 RM1.3m（55–60 岁）', '自雇用 i-Saraan（政府配对）和 PRS（减免 RM3,000）', '退休开支约为在职的 70%'] },
+    { key: 'base', name: '低风险资金底仓', test: function (d) { return d.liquid > 0 && d.emergencyMonths >= 6; }, why: '1–3 年内要用的钱放稳健工具', cards: ['定存阶梯、ASB/ASNB、Tabung Haji、货币市场基金', '新加坡 T-bills / SSB', '收益 3–5%，目标是不亏'] },
+    { key: 'invest', name: '长期定期投资', test: function (d) { return byKey(d, 'growth').score != null && byKey(d, 'growth').score >= 65; }, why: '每月定投、分散、低费用、年度再平衡', cards: ['全球/美股指数 ETF、马股 ETF、低费用单位信托、REITs', '股票比例 ≈ 100 − 年龄；每年再平衡一次', '马新买卖股票没有资本利得税'] },
+    { key: 'satellite', name: '高风险卫星投资', test: function () { return false; }, why: '只用可承受损失的一小部分', cards: ['个股、加密货币不超过可投资资产 5–10%', '黄金白银 5–10% 对冲', '保证月回报 > 1% 的都是骗局'] },
+    { key: 'property', name: '房产与重大长期资产', test: function () { return false; }, why: '自住优先；投资房看租金回报与持有成本', cards: ['租金回报 3–5%；算入维修、空置、管理费、门牌税', 'RPGT：前 3 年卖 30%，第 6 年起 0%（个人）', '单一资产占净资产 > 60% 要注意'] },
+    { key: 'legacy', name: '财富传承与遗产安排', test: function () { return false; }, why: '遗嘱 / Wasiat、受益人、文件库', cards: ['EPF、保险、PRS 的受益人指定', '遗嘱（非穆斯林）/ Wasiat + Hibah（穆斯林）', '重要文件库与数字资产交接'] }
+  ];
+  function byKey(d, k) { for (var i = 0; i < d.dims.length; i++) if (d.dims[i].key === k) return d.dims[i]; return { score: null }; }
+  // Returns levels with status: done | current (first not done) | open (actions allowed, learning unlocked when previous done) | later
+  function pyramidStatus(diag) {
+    var out = [], currentSet = false;
+    PYRAMID.forEach(function (lv, i) {
+      var done = false; try { done = !!lv.test(diag); } catch (e) { done = false; }
+      var status = done ? 'done' : (!currentSet ? 'current' : (i <= 5 ? 'open' : 'later'));
+      if (!done && !currentSet) currentSet = true;
+      out.push({ key: lv.key, level: i + 1, name: lv.name, why: lv.why, cards: lv.cards, status: status });
+    });
+    return out;
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -1256,7 +1281,8 @@
     compareShares: compareShares, parseSpeech: parseSpeech, MY_HOUSEHOLD_SHARES: MY_HOUSEHOLD_SHARES,
     parseReceipt: parseReceipt, MERCHANT_RULES: MERCHANT_RULES,
     RULES_VERSION: RULES_VERSION, EPF_RIA: EPF_RIA, healthDiagnosis: healthDiagnosis, allocatable: allocatable, allocationPlan: allocationPlan, recurringMonthly: recurringMonthly,
-    SAVING_METHODS: SAVING_METHODS, methodByKey: methodByKey, methodSchedule: methodSchedule, methodProgress: methodProgress, roundupAmount: roundupAmount, methodComparison: methodComparison
+    SAVING_METHODS: SAVING_METHODS, methodByKey: methodByKey, methodSchedule: methodSchedule, methodProgress: methodProgress, roundupAmount: roundupAmount, methodComparison: methodComparison,
+    PYRAMID: PYRAMID, pyramidStatus: pyramidStatus
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;

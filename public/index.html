@@ -210,6 +210,17 @@ body.lite .nav [data-tab="ledger"]{display:none}
 .mcat b{display:block}
 .mcat small{color:var(--muted);display:block}
 .mcat .who{color:var(--accent);font-size:12px}
+.pyr{display:flex;flex-direction:column;gap:6px}
+.pyr .lv{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;gap:10px;align-items:flex-start}
+.pyr .lv .no{width:26px;height:26px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.pyr .lv.done{border-color:var(--ok)}.pyr .lv.done .no{background:var(--ok);color:#fff}
+.pyr .lv.current{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface))}.pyr .lv.current .no{background:var(--accent);color:var(--accent-ink)}
+.pyr .lv.later{opacity:.6}
+.pyr .lv b{display:block}
+.pyr .lv small{color:var(--muted);display:block}
+.pyr .cards{margin:6px 0 0;padding-left:16px;font-size:12.5px;color:var(--ink)}
+.pyr .cards li{margin:2px 0}
+.kbsrc{font-size:11px;color:var(--muted);margin-top:6px}
 .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;margin-bottom:10px}
 .cal .hd{font-size:11px;color:var(--muted);text-align:center;padding:2px 0}
 .cal button{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:5px 2px;min-height:48px;display:flex;flex-direction:column;align-items:center;gap:1px;cursor:pointer;min-width:0}
@@ -274,6 +285,7 @@ body.lite .nav [data-tab="ledger"]{display:none}
     <button role="tab" data-tab="ledger" aria-selected="false">流水</button>
     <button role="tab" data-tab="report" aria-selected="false">报表</button>
     <button role="tab" data-tab="plan" aria-selected="false">预算与定期</button>
+    <button role="tab" data-tab="learn" aria-selected="false">学习</button>
     <button role="tab" data-tab="settings" aria-selected="false">导入与设置</button>
   </nav>
 
@@ -484,6 +496,42 @@ body.lite .nav [data-tab="ledger"]{display:none}
       <h2 id="rpYearTitle">年度收支</h2>
       <div style="overflow-x:auto"><table class="tbl" id="rpYear"></table></div>
       <div class="acts" style="margin-top:8px"><button class="btn small" id="rpExportYear">导出年度表 CSV</button><button class="btn small" id="rpExport">导出本月分类报表 CSV</button></div>
+    </div>
+  </section>
+
+  <!-- ===== 学习与规划 ===== -->
+  <section class="view" id="v-learn" hidden>
+    <div class="panel">
+      <h2>家庭财务进阶路线</h2>
+      <p class="muted">按你的数据判断每一层做到了没有。学习内容逐层打开，但必要的行动不会被锁住：有高息债先还债，没备用金先存钱，其余可以并行。</p>
+      <div class="pyr" id="pyramid"></div>
+    </div>
+    <div class="panel">
+      <h2 id="taxTitle">税务减免清单</h2>
+      <p class="muted" id="taxHint"></p>
+      <ul class="list" id="taxList"></ul>
+      <div class="muted" id="taxSum" style="margin-top:8px"></div>
+    </div>
+    <div class="panel">
+      <h2>退休储蓄（KWSP 三档）</h2>
+      <div id="epfBox"></div>
+    </div>
+    <div class="panel">
+      <h2>和 Belanjawanku 生活费基准比</h2>
+      <div class="form"><label>家庭结构<select id="bwType"></select></label></div>
+      <div id="bwBox" style="margin-top:8px"></div>
+    </div>
+    <div class="panel">
+      <h2>债务与保障常识</h2>
+      <div id="debtKb"></div>
+    </div>
+    <div class="panel">
+      <h2>投资原则（教育，不是建议）</h2>
+      <div id="investKb"></div>
+    </div>
+    <div class="panel">
+      <h2>传承清单</h2>
+      <ul class="list" id="estateList"></ul>
     </div>
   </section>
 
@@ -765,7 +813,8 @@ body.lite .nav [data-tab="ledger"]{display:none}
     <div class="ph"><h2>更多</h2><button class="btn small" data-close>关闭</button></div>
     <div class="more">
       <button class="btn" data-tab="report"><span>报表 · 分类、成员、账户、年度</span><span>›</span></button>
-      <button class="btn" data-tab="plan"><span>预算、定期项目、目标、提醒</span><span>›</span></button>
+      <button class="btn" data-tab="plan"><span>存钱法、预算、定期项目、目标、提醒</span><span>›</span></button>
+      <button class="btn" data-tab="learn"><span>学习与规划 · 进阶路线、税务减免、退休、知识卡</span><span>›</span></button>
       <button class="btn" data-tab="settings"><span>导入账单、备份、成员、设置</span><span>›</span></button>
     </div>
   </div>
@@ -2111,6 +2160,31 @@ body.lite .nav [data-tab="ledger"]{display:none}
     return { before: b, after: a, delta: b != null && a != null ? a - b : null, monthsAfter: after.length, monthsBefore: before.length };
   }
 
+  // ---------- financial pyramid: level status from the diagnosis (learning unlocks progressively; actions never hard-locked) ----------
+  var PYRAMID = [
+    { key: 'protect', name: '必要保障与现金流安全', test: function (d) { return byKey(d, 'cover').score >= 70 && byKey(d, 'cashflow').score >= 25; }, why: '医药卡、人寿保额、正的现金流', cards: ['人寿保额 ≈ 年收入 × 10 + 负债 − 现金', '每人一张医药卡；看年限额、终身限额、等候期', '储蓄率先过 10%，再谈其他'] },
+    { key: 'emergency', name: '应急备用金', test: function (d) { return d.emergencyMonths != null && d.emergencyMonths >= 3; }, why: '可动用现金 ≥ 3 个月开销（目标 6）', cards: ['阶梯：RM1,000 → 1 个月 → 3 个月 → 6 个月', '放定存阶梯或货币市场基金，不放股票', '自雇或单收入家庭建议 9–12 个月'] },
+    { key: 'debt', name: '高成本债务管理', test: function (d) { return !(d.highCost && d.highCost.length) && (byKey(d, 'debt').score == null || byKey(d, 'debt').score >= 70); }, why: '没有信用卡/个人贷款余额，月供 ≤ 35% 收入', cards: ['信用卡 15–18%：任何稳健投资都跑不赢，先还', '雪球（先小额，有成就感）vs 雪崩（先高息，省最多）', '房贷利率差 > 0.5% 可考虑再融资；AKPK 可免费重组'] },
+    { key: 'retire', name: '退休储蓄', test: function (d) { return byKey(d, 'retire').score >= 70; }, why: 'EPF/PRS 进度跟得上年龄', cards: ['KWSP 三档：基本 RM390k、适足 RM650k、充裕 RM1.3m（55–60 岁）', '自雇用 i-Saraan（政府配对）和 PRS（减免 RM3,000）', '退休开支约为在职的 70%'] },
+    { key: 'base', name: '低风险资金底仓', test: function (d) { return d.liquid > 0 && d.emergencyMonths >= 6; }, why: '1–3 年内要用的钱放稳健工具', cards: ['定存阶梯、ASB/ASNB、Tabung Haji、货币市场基金', '新加坡 T-bills / SSB', '收益 3–5%，目标是不亏'] },
+    { key: 'invest', name: '长期定期投资', test: function (d) { return byKey(d, 'growth').score != null && byKey(d, 'growth').score >= 65; }, why: '每月定投、分散、低费用、年度再平衡', cards: ['全球/美股指数 ETF、马股 ETF、低费用单位信托、REITs', '股票比例 ≈ 100 − 年龄；每年再平衡一次', '马新买卖股票没有资本利得税'] },
+    { key: 'satellite', name: '高风险卫星投资', test: function () { return false; }, why: '只用可承受损失的一小部分', cards: ['个股、加密货币不超过可投资资产 5–10%', '黄金白银 5–10% 对冲', '保证月回报 > 1% 的都是骗局'] },
+    { key: 'property', name: '房产与重大长期资产', test: function () { return false; }, why: '自住优先；投资房看租金回报与持有成本', cards: ['租金回报 3–5%；算入维修、空置、管理费、门牌税', 'RPGT：前 3 年卖 30%，第 6 年起 0%（个人）', '单一资产占净资产 > 60% 要注意'] },
+    { key: 'legacy', name: '财富传承与遗产安排', test: function () { return false; }, why: '遗嘱 / Wasiat、受益人、文件库', cards: ['EPF、保险、PRS 的受益人指定', '遗嘱（非穆斯林）/ Wasiat + Hibah（穆斯林）', '重要文件库与数字资产交接'] }
+  ];
+  function byKey(d, k) { for (var i = 0; i < d.dims.length; i++) if (d.dims[i].key === k) return d.dims[i]; return { score: null }; }
+  // Returns levels with status: done | current (first not done) | open (actions allowed, learning unlocked when previous done) | later
+  function pyramidStatus(diag) {
+    var out = [], currentSet = false;
+    PYRAMID.forEach(function (lv, i) {
+      var done = false; try { done = !!lv.test(diag); } catch (e) { done = false; }
+      var status = done ? 'done' : (!currentSet ? 'current' : (i <= 5 ? 'open' : 'later'));
+      if (!done && !currentSet) currentSet = true;
+      out.push({ key: lv.key, level: i + 1, name: lv.name, why: lv.why, cards: lv.cards, status: status });
+    });
+    return out;
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -2141,10 +2215,107 @@ body.lite .nav [data-tab="ledger"]{display:none}
     compareShares: compareShares, parseSpeech: parseSpeech, MY_HOUSEHOLD_SHARES: MY_HOUSEHOLD_SHARES,
     parseReceipt: parseReceipt, MERCHANT_RULES: MERCHANT_RULES,
     RULES_VERSION: RULES_VERSION, EPF_RIA: EPF_RIA, healthDiagnosis: healthDiagnosis, allocatable: allocatable, allocationPlan: allocationPlan, recurringMonthly: recurringMonthly,
-    SAVING_METHODS: SAVING_METHODS, methodByKey: methodByKey, methodSchedule: methodSchedule, methodProgress: methodProgress, roundupAmount: roundupAmount, methodComparison: methodComparison
+    SAVING_METHODS: SAVING_METHODS, methodByKey: methodByKey, methodSchedule: methodSchedule, methodProgress: methodProgress, roundupAmount: roundupAmount, methodComparison: methodComparison,
+    PYRAMID: PYRAMID, pyramidStatus: pyramidStatus
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* Malaysia knowledge base: every rule carries country, year of assessment / effective year, who it applies to,
+ * the rule, exceptions, an official source and the date we last checked it. Served to the page by build.py.
+ * Figures must be updated per year; the UI always shows the year and source next to any number. */
+(function (root) {
+  'use strict';
+  var CHECKED = '2026-10-16';
+  var KB = {
+    checked: CHECKED,
+    country: 'MY',
+    // Personal income tax reliefs, Year of Assessment 2025 (filed in 2026). Source: LHDN tax relief summary YA2025.
+    taxReliefs: {
+      ya: 2025, source: 'LHDN — Tax Relief for Resident Individual YA2025 (hasil.gov.my)', checked: CHECKED,
+      items: [
+        { key: 'self', name: '个人及受抚养亲属', cap: 9000, auto: true, note: '自动给予' },
+        { key: 'spouse', name: '配偶（无收入）/ 赡养费', cap: 4000, note: '配偶没有收入或选择合并报税' },
+        { key: 'child', name: '子女（18 岁以下）', cap: 2000, per: '每名', note: '18 岁以上在读大专 RM8,000' },
+        { key: 'parentsMedical', name: '父母医疗、特殊需要及照护', cap: 8000, note: '含体检、疫苗、牙科上限见规定' },
+        { key: 'medical', name: '自身、配偶、子女的严重疾病医疗', cap: 10000, note: '含体检 RM1,000、疫苗、牙科 RM1,000、心理咨询' },
+        { key: 'lifeEpf', name: '人寿保险 + EPF', cap: 7000, note: '受雇者：EPF 最多 RM4,000 + 人寿 RM3,000；自雇可全额用于人寿或自愿 EPF' },
+        { key: 'medicalIns', name: '教育及医药保险', cap: 3000 },
+        { key: 'prs', name: '私人退休计划 PRS / 延期年金', cap: 3000, note: '至 YA2030' },
+        { key: 'sspn', name: 'SSPN 教育储蓄（净存入）', cap: 8000 },
+        { key: 'lifestyle', name: '生活方式（书、电脑、手机、网络、课程）', cap: 2500 },
+        { key: 'sports', name: '运动器材、场地、比赛费、健身会员', cap: 1000 },
+        { key: 'childcare', name: '托儿所 / 幼儿园学费（6 岁以下）', cap: 3000 },
+        { key: 'breastfeeding', name: '哺乳器材（2 岁以下）', cap: 1000, note: '每两年一次' },
+        { key: 'ev', name: '电动车充电设备 / 订阅', cap: 2500 },
+        { key: 'disabled', name: '残障人士本人 / 配偶 / 子女', cap: 7000, note: '本人 RM7,000；残障子女 RM8,000 另加' },
+        { key: 'socso', name: 'SOCSO / EIS 供款', cap: 350 },
+        { key: 'housingLoanInterest', name: '首套住宅房贷利息（2025 起新规）', cap: 7000, note: '房价 ≤ RM500k 上限 RM7,000；RM500k–750k 上限 RM5,000；连续三年' }
+      ]
+    },
+    // KWSP Retirement Income Adequacy framework (announced 2024, effective 2026): three savings levels at age 60.
+    epf: {
+      effective: 2026, source: 'KWSP — Retirement Income Adequacy (RIA) Framework', checked: CHECKED,
+      tiers: [
+        { key: 'basic', name: '基本', amount: 390000, monthly: 1300, note: '覆盖基本生活开销约 20 年' },
+        { key: 'adequate', name: '适足', amount: 650000, monthly: 2600, note: '合理生活水平' },
+        { key: 'enhanced', name: '充裕', amount: 1300000, monthly: 5200, note: '较高生活品质' }
+      ],
+      contribution: { employee: 0.11, employerUnder60: 0.13, employerUnder60HighWage: 0.12, note: '月薪 ≤ RM5,000 雇主 13%，> RM5,000 雇主 12%；60 岁以上减半' },
+      accounts: [['Akaun Persaraan', 0.75], ['Akaun Sejahtera', 0.15], ['Akaun Fleksibel', 0.10]],
+      iSaraan: { incentive: 0.15, cap: 500, note: '自雇 i-Saraan：政府配对 15%，每年最高 RM500（至 2025 年政策），自愿缴可享税务减免' }
+    },
+    // Belanjawanku (EPF / SWRC) reference monthly budgets, Klang Valley 2024/25 edition (rounded).
+    belanjawanku: {
+      edition: '2024/25', source: 'KWSP Belanjawanku Expenditure Guide (Klang Valley)', checked: CHECKED,
+      households: [
+        { key: 'single', name: '单身（租房）', monthly: 2690 },
+        { key: 'coupleNoKids', name: '夫妻无孩子', monthly: 4870 },
+        { key: 'couple1', name: '夫妻 + 1 孩', monthly: 6090 },
+        { key: 'couple2', name: '夫妻 + 2 孩', monthly: 7050 },
+        { key: 'seniorCouple', name: '退休夫妻', monthly: 3210 }
+      ],
+      note: '以巴生谷为准；东马（古晋）生活费一般低 10–20%，仅作参考'
+    },
+    // Debt rules of thumb used by banks and AKPK.
+    debt: {
+      source: 'Bank Negara Malaysia Responsible Financing Guidelines; AKPK', checked: CHECKED,
+      dsrMax: 0.6, dsrSafe: 0.35, note: '银行按 DSR 审批，常见上限 60%（低收入更严）；AKPK 建议月供不超过收入 35–40%',
+      typicalRates: [['信用卡', '15–18% 年利率'], ['个人贷款', '6–10%'], ['车贷（固定利率换算）', '约 5–7% 实际年利率'], ['房贷', '3.8–4.5%'], ['PTPTN', '1% 行政费（Ujrah）']],
+      akpk: '免费债务管理与重组：akpk.org.my，03-2616 7766'
+    },
+    // Protection rules of thumb.
+    protection: {
+      source: 'LIAM / Bank Negara 消费者教育; 常用经验法则', checked: CHECKED,
+      lifeCoverMultiple: 10, criticalIllnessYears: 3, medicalCardNote: '每人一张医药卡，注意年限额、终身限额、等候期和 2025 年起的共付（co-payment）产品选项',
+      perkeso: 'SOCSO 受雇者身故/伤残有基本保障；自雇可自愿参加 SKSPS'
+    },
+    // Investment basics for MY/SG families (education only; no product recommendations).
+    investing: {
+      source: 'SC Malaysia InvestSmart; 通用资产配置原则', checked: CHECKED,
+      principles: [
+        '先保障、备用金、清高息债，再投资',
+        '长期资金用低费用、分散的工具（指数基金 / ETF），每月定投，每年再平衡',
+        '股票比例经验公式：100 − 年龄；单一资产（含自住房）占净资产超过 60% 要注意集中风险',
+        '马来西亚个人买卖股票没有资本利得税；新加坡也没有，这是本地优势',
+        '保证每月回报 1% 以上的"投资"几乎都是骗局；查 SC 持牌名单和 BNM 警示名单',
+        '加密货币等高波动资产不超过可投资资产的 5–10%'
+      ],
+      lowRisk: ['定存（阶梯）', 'ASB / ASNB 固定价格基金', 'Tabung Haji', '货币市场基金', '新加坡 T-bills / SSB'],
+      core: ['全球或美股指数 ETF（经本地或海外券商）', '马股 ETF', '低费用单位信托（总费用 < 1.5%）', '马新 REITs'],
+      satellite: ['个股', '加密货币（≤5–10%）', '黄金白银（5–10% 对冲）', 'P2P 融资']
+    },
+    // Estate planning checklist.
+    estate: {
+      source: 'Amanah Raya; 马来西亚遗产分配法令; 伊斯兰 Faraid', checked: CHECKED,
+      items: ['遗嘱（非穆斯林）或 Wasiat（穆斯林，最多三分之一可自由处置）', 'Hibah（生前赠与）用于房产或保单', 'EPF、保险、PRS 的受益人指定（nomination）', '联名户口的生存者取得条款', '数字资产与密码交接清单', '重要文件库：地契、保单、贷款合同、车卡']
+    }
+  };
+  if (typeof module !== 'undefined' && module.exports) module.exports = KB;
+  else root.KB = KB;
 })(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
@@ -2930,6 +3101,8 @@ function renderActionPlan() {
   } else {
     h += '<div class="task"><b>还没有可分配的钱</b><p>' + esc(plan.note || '先补上收入与固定支出的定期项目，系统才能算出每月能安排多少。') + '</p><div class="acts" style="justify-content:flex-start;margin:0"><button class="btn small" data-act="new-rec">添加定期收入/支出</button></div></div>';
   }
+  var cur = L.pyramidStatus(diag).find(function (x) { return x.status === 'current'; });
+  if (cur) h += '<div class="task"><div class="lbl">现在所在的层级</div><b>第 ' + cur.level + ' 层 · ' + esc(cur.name) + '</b><p>' + esc(cur.why) + '</p><div class="acts" style="justify-content:flex-start;margin:0"><button class="btn small" data-tab="learn">看这一层怎么做 ›</button></div></div>';
   var methods = methodsDoc();
   if (methods.length) {
     var mctx = methodCtx();
@@ -2975,6 +3148,58 @@ document.addEventListener('click', function (e) {
 $('hsSave').addEventListener('click', function () {
   var body = Object.assign({}, prefs(), { birthYear: Number($('hsBirth').value) || null, lifeCover: Number($('hsCover').value) || 0 });
   S.db.collection('settings').doc('prefs').set(body).then(function () { closeSheets(); toast('已保存'); }).catch(function (x) { toast(errText(x)); });
+});
+
+// ---------- learn: pyramid + knowledge base ----------
+function kbSrc(sec) { return '<div class="kbsrc">来源：' + esc(sec.source) + ' · 核对日期 ' + esc(sec.checked) + '</div>'; }
+function taxUsed() { return (S.settings.tax && S.settings.tax[String(KB.taxReliefs.ya)]) || {}; }
+function renderLearn() {
+  var KBx = window.KB; if (!KBx) return;
+  var diag = diagNow(), pyr = L.pyramidStatus(diag);
+  $('pyramid').innerHTML = pyr.slice().reverse().map(function (lv) {
+    return '<div class="lv ' + lv.status + '"><span class="no">' + (lv.status === 'done' ? '✓' : lv.level) + '</span><span style="min-width:0;flex:1"><b>' + esc(lv.name) + ' <span class="tag">' + (lv.status === 'done' ? '已达到' : lv.status === 'current' ? '现在做这一层' : lv.status === 'open' ? '可并行' : '之后') + '</span></b><small>达成条件：' + esc(lv.why) + '</small>' +
+      (lv.status !== 'later' ? '<ul class="cards">' + lv.cards.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>' : '') + '</span></div>';
+  }).join('');
+  var tr = KBx.taxReliefs, used = taxUsed(), total = 0;
+  $('taxTitle').textContent = '税务减免清单 · 课税年 ' + tr.ya + '（' + (tr.ya + 1) + ' 年报税）';
+  $('taxHint').textContent = '勾选今年已经用到的项目，看看还有哪些可以用。金额是上限，实际按花费。';
+  $('taxList').innerHTML = tr.items.map(function (it) {
+    var on = !!used[it.key]; if (on) total += it.cap;
+    return '<li class="li"><label class="chk" style="flex:1"><input type="checkbox" data-tax="' + it.key + '"' + (on ? ' checked' : '') + (it.auto ? ' disabled' : '') + '> <span><b>' + esc(it.name) + '</b>' + (it.note ? '<br><small class="muted">' + esc(it.note) + '</small>' : '') + '</span></label><span class="v"><b class="num">RM ' + num(it.cap) + '</b>' + (it.per ? '<span class="st">' + esc(it.per) + '</span>' : '') + '</span></li>';
+  }).join('');
+  var all = tr.items.reduce(function (a, i) { return a + i.cap; }, 0);
+  $('taxSum').innerHTML = '已勾选项目上限合计 <b>RM ' + num(total) + '</b>，清单全部上限 RM ' + num(all) + '。按 8% 税率，每多用 RM1,000 减免约省 RM80；按 24% 约省 RM240。' + kbSrc(tr);
+  var retire = diag.retire, age = prefs().birthYear ? Number(S.month.slice(0, 4)) - Number(prefs().birthYear) : null;
+  $('epfBox').innerHTML = KBx.epf.tiers.map(function (t) {
+    var p = Math.min(100, retire / t.amount * 100);
+    return '<div class="trow"><span>' + esc(t.name) + ' RM ' + num(t.amount) + ' <span class="muted">≈ 每月 ' + num(t.monthly) + '</span></span><span class="v">' + p.toFixed(0) + '%</span><div class="bar-track"><div class="bar-fill" style="width:' + p.toFixed(0) + '%"></div></div></div>';
+  }).join('') + '<div class="muted">你家退休金合计 ' + rm(retire) + (age ? '，' + age + ' 岁' : '，填出生年份可按年龄算进度（健康指数里）') + '。雇员 11% + 雇主 12–13%；自雇 i-Saraan 政府配对 15%（每年上限 RM500）。</div>' + kbSrc(KBx.epf);
+  var bw = KBx.belanjawanku, sel = $('bwType');
+  if (!sel.options.length) sel.innerHTML = bw.households.map(function (h) { return '<option value="' + h.key + '">' + esc(h.name) + ' · RM ' + num(h.monthly) + '</option>'; }).join('');
+  var hh = bw.households.find(function (h) { return h.key === sel.value; }) || bw.households[2];
+  var mine = diag.expense;
+  $('bwBox').innerHTML = '<div class="kpi"><span>你家近 3 个月平均开销</span><b>' + rm(mine) + '</b></div><div class="kpi"><span>' + esc(hh.name) + ' 基准（巴生谷）</span><b>' + rm(hh.monthly) + '</b></div>' +
+    '<div class="muted">' + (mine > 0 ? (mine > hh.monthly ? '比基准高 ' + ((mine / hh.monthly - 1) * 100).toFixed(0) + '%' : '比基准低 ' + ((1 - mine / hh.monthly) * 100).toFixed(0) + '%') + '。' : '') + esc(bw.note) + '</div>' + kbSrc(bw);
+  var dk = KBx.debt, pk = KBx.protection;
+  $('debtKb').innerHTML = '<table class="tbl">' + dk.typicalRates.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('') + '</table><div class="muted" style="margin-top:6px">' + esc(dk.note) + '。' + esc(dk.akpk) + '</div>' +
+    '<div class="muted" style="margin-top:6px">保障：人寿保额 ≈ 年收入 × ' + pk.lifeCoverMultiple + ' + 负债 − 现金；重疾险 ≈ ' + pk.criticalIllnessYears + ' 年收入；' + esc(pk.medicalCardNote) + '；' + esc(pk.perkeso) + '。</div>' + kbSrc(dk);
+  var iv = KBx.investing;
+  $('investKb').innerHTML = '<ul class="cards" style="padding-left:16px">' + iv.principles.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' +
+    '<div class="muted" style="margin-top:6px"><b>低风险底仓：</b>' + esc(iv.lowRisk.join('、')) + '<br><b>核心长期：</b>' + esc(iv.core.join('、')) + '<br><b>卫星（≤10–15%）：</b>' + esc(iv.satellite.join('、')) + '</div>' + kbSrc(iv);
+  var es = KBx.estate, esUsed = (S.settings.estate && S.settings.estate.done) || {};
+  $('estateList').innerHTML = es.items.map(function (it, i) { return '<li class="li"><label class="chk" style="flex:1"><input type="checkbox" data-estate="' + i + '"' + (esUsed[i] ? ' checked' : '') + '> <span>' + esc(it) + '</span></label></li>'; }).join('') + '<li class="li"><span class="muted">' + kbSrc(es) + '</span></li>';
+}
+$('bwType').addEventListener('change', renderLearn);
+$('taxList').addEventListener('change', function (e) {
+  var cb = e.target.closest('[data-tax]'); if (!cb) return;
+  var tax = Object.assign({}, S.settings.tax || {}); var ya = String(window.KB.taxReliefs.ya);
+  tax[ya] = Object.assign({}, tax[ya] || {}); tax[ya][cb.dataset.tax] = cb.checked;
+  S.db.collection('settings').doc('tax').set(tax).then(function () { track('tax_tick'); }).catch(function (x) { toast(errText(x)); });
+});
+$('estateList').addEventListener('change', function (e) {
+  var cb = e.target.closest('[data-estate]'); if (!cb) return;
+  var done = Object.assign({}, (S.settings.estate && S.settings.estate.done) || {}); done[cb.dataset.estate] = cb.checked;
+  S.db.collection('settings').doc('estate').set({ done: done }).catch(function (x) { toast(errText(x)); });
 });
 
 // ---------- saving methods ----------
@@ -4256,7 +4481,7 @@ async function runImport() {
 function showTab(name) {
   S.tab = name;
   document.querySelectorAll('[data-tab]').forEach(function (b) { b.setAttribute('aria-selected', String(b.dataset.tab === name)); });
-  var moreBtn = document.querySelector('#nav [data-more]'); if (moreBtn) moreBtn.setAttribute('aria-selected', String(['report', 'plan', 'settings'].indexOf(name) >= 0));
+  var moreBtn = document.querySelector('#nav [data-more]'); if (moreBtn) moreBtn.setAttribute('aria-selected', String(['report', 'plan', 'settings', 'learn'].indexOf(name) >= 0));
   document.querySelectorAll('.view').forEach(function (v) { v.hidden = v.id !== 'v-' + name; });
   if (name === 'balances' && prefs().mode === 'lite' && S._liteJump) { S._liteJump = false; setTimeout(openBatch, 50); }
   if (name === 'ledger' && !S._ledgerOpened) { S._ledgerOpened = true; if (!$('lMonth').value) { $('lMonth').value = S.month; S.ledger.month = S.month; } }
@@ -4287,6 +4512,7 @@ function renderNow() {
   if (t === 'entry') renderRecent();
   if (t === 'ledger') renderLedger();
   if (t === 'report') renderReport();
+  if (t === 'learn') renderLearn();
   if (t === 'plan') renderPlan();
   if (t === 'settings') renderSettings();
   if (t !== 'overview') { /* overview also shown in header cards */ }

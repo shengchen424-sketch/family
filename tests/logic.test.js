@@ -681,4 +681,26 @@ t('before/after comparison of savings rate', () => {
   assert.ok(Math.abs(c.before - 0.1) < 1e-9); assert.ok(Math.abs(c.after - 0.3) < 1e-9); assert.ok(Math.abs(c.delta - 0.2) < 1e-9);
 });
 
+// 20. Pyramid + knowledge base
+t('pyramid status: done / current / open / later from the diagnosis', () => {
+  const h = L.healthDiagnosis({ accounts: dacc, balances: dbal, rates: {}, tx: dtx, recurring: drec, month: M, prefs: { lifeCover: 0 } });
+  const p = L.pyramidStatus(h);
+  assert.strictEqual(p.length, 9);
+  assert.strictEqual(p[0].status, 'current', 'cover not filled → protection is the current level');
+  assert.ok(p.slice(1, 6).every(x => x.status === 'open' || x.status === 'done'));
+  assert.ok(p.slice(6).every(x => x.status === 'later'));
+  const rich = L.healthDiagnosis({ accounts: { pbb: dacc.pbb, epf: dacc.epf }, balances: { a: { month: M, accountId: 'pbb', amount: 60000, currency: 'MYR' }, c: { month: M, accountId: 'epf', amount: 400000, currency: 'MYR' } }, rates: {}, tx: dtx, recurring: drec, month: M, prefs: { lifeCover: 2000000 } });
+  const p2 = L.pyramidStatus(rich);
+  assert.deepStrictEqual(p2.slice(0, 5).map(x => x.status), ['done', 'done', 'done', 'done', 'done']);
+  assert.strictEqual(p2[5].status, 'current');
+});
+t('knowledge base: every section has a source and check date; tax reliefs carry the year of assessment', () => {
+  const KB = require('../src/knowledge.js');
+  ['taxReliefs', 'epf', 'belanjawanku', 'debt', 'protection', 'investing', 'estate'].forEach(k => { assert.ok(KB[k].source, k + ' source'); assert.ok(KB[k].checked, k + ' checked'); });
+  assert.strictEqual(KB.taxReliefs.ya, 2025);
+  assert.ok(KB.taxReliefs.items.length >= 15 && KB.taxReliefs.items.every(i => i.name && i.cap > 0));
+  assert.deepStrictEqual(KB.epf.tiers.map(t => t.amount), [390000, 650000, 1300000]);
+  assert.ok(KB.belanjawanku.households.find(h => h.key === 'couple1').monthly > 5000);
+});
+
 console.log('\n' + passed + ' tests passed');

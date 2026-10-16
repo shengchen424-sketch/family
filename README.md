@@ -82,3 +82,13 @@ bash scripts/keys.sh remove-temp   # 删除 systemd 单元里的临时密钥 Che
 - 域名 `chen-family424.duckdns.org`（DuckDNS 免费）指向 187.77.128.30；`data/domain.txt` 记录域名，`keys.sh` 生成链接时会用它。
 - 证书：Let's Encrypt，`certbot certonly --webroot -w /var/www/html -d chen-family424.duckdns.org`（80 端口由现有 nginx 提供验证目录）。证书在 `/etc/letsencrypt/live/chen-family424.duckdns.org/`，systemd 单元的 TLS_CERT / TLS_KEY 指向它；`/etc/letsencrypt/renewal-hooks/deploy/family-assets.sh` 在续期后自动重启服务。certbot 的 systemd timer 每天检查续期。
 - 端口仍是 8444（443 被 sshd 占用）。访问地址：`https://chen-family424.duckdns.org:8444/`。
+
+## 行动闭环（2026-10-16 晚）
+
+- **首页"我的家庭财务计划"**：本月可分配金额 = 定期收入（或近 3 个月平均收入）− 固定支出与月供 − 平均其他开销；分配规则 `RULES_VERSION v1`（备用金 < 1 个月 → 60%；高息债务 → 40%；备用金未达标 → 40%；长期/退休 ≥ 30%；目标按每月需存额；其余自由支配），生成当月任务（`tasks` 集合，编号 `月份__规则`，不重复），可"已完成 / 跳过"，下月重算。
+- **财务健康指数**：六维（现金流、流动性、债务、保障、退休、财富增长）各 0–100，取均值；点开看依据与做法；出生年份与保额存在 `settings/prefs`。
+- **存钱法**（预算与定期页顶部 / 首页提示）：16 种（比例、挑战、结构、目标），挑战类有打卡格子，进度从现金流算，开始后对比前后储蓄率。存在 `settings/savingMethods`。
+- **学习与规划页**：九层进阶路线按诊断标注已达到 / 现在 / 可并行 / 之后；LHDN YA2025 减免清单可勾选（`settings/tax`）；KWSP 三档；Belanjawanku 基准对比；债务利率与 AKPK；投资原则（教育）；传承清单。所有数字带来源与核对日期，在 `src/knowledge.js`。
+- **轻量模式**：设置里切换，中键变"更新余额"，隐藏日常记账细节。
+- **底座**：`tests/accounting.test.js` 14 项账务正确性测试；私人账户（服务端过滤）；匿名使用事件 `track` 与运营者 `usageStats`；owner 可删除本家庭全部数据。
+- 上架清单见 `docs/play-store-checklist.md`。

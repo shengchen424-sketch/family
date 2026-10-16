@@ -10,7 +10,8 @@ logic = rd('src/logic.js')
 api = rd('src/api.html')
 shim = rd('src/shim.html')
 assert '<script src="logic.js"></script>' in html, 'logic include missing'
-html = html.replace('<script src="logic.js"></script>', '<script>\n' + logic + '\n</script>', 1)
+kb = rd('src/knowledge.js')
+html = html.replace('<script src="logic.js"></script>', '<script>\n' + logic + '\n</script>\n<script>\n' + kb + '\n</script>', 1)
 main = html.index('<script>\n(function () {')
 html = html[:main] + shim + '\n' + api + '\n' + html[main:]
 # app.html is a body fragment (the Apps Script host adds the document shell); the VPS serves it as a full page

@@ -198,6 +198,17 @@ body.lite .nav [data-tab="ledger"]{display:none}
 .mcat b{display:block}
 .mcat small{color:var(--muted);display:block}
 .mcat .who{color:var(--accent);font-size:12px}
+.pyr{display:flex;flex-direction:column;gap:6px}
+.pyr .lv{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;gap:10px;align-items:flex-start}
+.pyr .lv .no{width:26px;height:26px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.pyr .lv.done{border-color:var(--ok)}.pyr .lv.done .no{background:var(--ok);color:#fff}
+.pyr .lv.current{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface))}.pyr .lv.current .no{background:var(--accent);color:var(--accent-ink)}
+.pyr .lv.later{opacity:.6}
+.pyr .lv b{display:block}
+.pyr .lv small{color:var(--muted);display:block}
+.pyr .cards{margin:6px 0 0;padding-left:16px;font-size:12.5px;color:var(--ink)}
+.pyr .cards li{margin:2px 0}
+.kbsrc{font-size:11px;color:var(--muted);margin-top:6px}
 .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;margin-bottom:10px}
 .cal .hd{font-size:11px;color:var(--muted);text-align:center;padding:2px 0}
 .cal button{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:5px 2px;min-height:48px;display:flex;flex-direction:column;align-items:center;gap:1px;cursor:pointer;min-width:0}
@@ -262,6 +273,7 @@ body.lite .nav [data-tab="ledger"]{display:none}
     <button role="tab" data-tab="ledger" aria-selected="false">流水</button>
     <button role="tab" data-tab="report" aria-selected="false">报表</button>
     <button role="tab" data-tab="plan" aria-selected="false">预算与定期</button>
+    <button role="tab" data-tab="learn" aria-selected="false">学习</button>
     <button role="tab" data-tab="settings" aria-selected="false">导入与设置</button>
   </nav>
 
@@ -472,6 +484,42 @@ body.lite .nav [data-tab="ledger"]{display:none}
       <h2 id="rpYearTitle">年度收支</h2>
       <div style="overflow-x:auto"><table class="tbl" id="rpYear"></table></div>
       <div class="acts" style="margin-top:8px"><button class="btn small" id="rpExportYear">导出年度表 CSV</button><button class="btn small" id="rpExport">导出本月分类报表 CSV</button></div>
+    </div>
+  </section>
+
+  <!-- ===== 学习与规划 ===== -->
+  <section class="view" id="v-learn" hidden>
+    <div class="panel">
+      <h2>家庭财务进阶路线</h2>
+      <p class="muted">按你的数据判断每一层做到了没有。学习内容逐层打开，但必要的行动不会被锁住：有高息债先还债，没备用金先存钱，其余可以并行。</p>
+      <div class="pyr" id="pyramid"></div>
+    </div>
+    <div class="panel">
+      <h2 id="taxTitle">税务减免清单</h2>
+      <p class="muted" id="taxHint"></p>
+      <ul class="list" id="taxList"></ul>
+      <div class="muted" id="taxSum" style="margin-top:8px"></div>
+    </div>
+    <div class="panel">
+      <h2>退休储蓄（KWSP 三档）</h2>
+      <div id="epfBox"></div>
+    </div>
+    <div class="panel">
+      <h2>和 Belanjawanku 生活费基准比</h2>
+      <div class="form"><label>家庭结构<select id="bwType"></select></label></div>
+      <div id="bwBox" style="margin-top:8px"></div>
+    </div>
+    <div class="panel">
+      <h2>债务与保障常识</h2>
+      <div id="debtKb"></div>
+    </div>
+    <div class="panel">
+      <h2>投资原则（教育，不是建议）</h2>
+      <div id="investKb"></div>
+    </div>
+    <div class="panel">
+      <h2>传承清单</h2>
+      <ul class="list" id="estateList"></ul>
     </div>
   </section>
 
@@ -753,7 +801,8 @@ body.lite .nav [data-tab="ledger"]{display:none}
     <div class="ph"><h2>更多</h2><button class="btn small" data-close>关闭</button></div>
     <div class="more">
       <button class="btn" data-tab="report"><span>报表 · 分类、成员、账户、年度</span><span>›</span></button>
-      <button class="btn" data-tab="plan"><span>预算、定期项目、目标、提醒</span><span>›</span></button>
+      <button class="btn" data-tab="plan"><span>存钱法、预算、定期项目、目标、提醒</span><span>›</span></button>
+      <button class="btn" data-tab="learn"><span>学习与规划 · 进阶路线、税务减免、退休、知识卡</span><span>›</span></button>
       <button class="btn" data-tab="settings"><span>导入账单、备份、成员、设置</span><span>›</span></button>
     </div>
   </div>
@@ -1414,6 +1463,8 @@ function renderActionPlan() {
   } else {
     h += '<div class="task"><b>还没有可分配的钱</b><p>' + esc(plan.note || '先补上收入与固定支出的定期项目，系统才能算出每月能安排多少。') + '</p><div class="acts" style="justify-content:flex-start;margin:0"><button class="btn small" data-act="new-rec">添加定期收入/支出</button></div></div>';
   }
+  var cur = L.pyramidStatus(diag).find(function (x) { return x.status === 'current'; });
+  if (cur) h += '<div class="task"><div class="lbl">现在所在的层级</div><b>第 ' + cur.level + ' 层 · ' + esc(cur.name) + '</b><p>' + esc(cur.why) + '</p><div class="acts" style="justify-content:flex-start;margin:0"><button class="btn small" data-tab="learn">看这一层怎么做 ›</button></div></div>';
   var methods = methodsDoc();
   if (methods.length) {
     var mctx = methodCtx();
@@ -1459,6 +1510,58 @@ document.addEventListener('click', function (e) {
 $('hsSave').addEventListener('click', function () {
   var body = Object.assign({}, prefs(), { birthYear: Number($('hsBirth').value) || null, lifeCover: Number($('hsCover').value) || 0 });
   S.db.collection('settings').doc('prefs').set(body).then(function () { closeSheets(); toast('已保存'); }).catch(function (x) { toast(errText(x)); });
+});
+
+// ---------- learn: pyramid + knowledge base ----------
+function kbSrc(sec) { return '<div class="kbsrc">来源：' + esc(sec.source) + ' · 核对日期 ' + esc(sec.checked) + '</div>'; }
+function taxUsed() { return (S.settings.tax && S.settings.tax[String(KB.taxReliefs.ya)]) || {}; }
+function renderLearn() {
+  var KBx = window.KB; if (!KBx) return;
+  var diag = diagNow(), pyr = L.pyramidStatus(diag);
+  $('pyramid').innerHTML = pyr.slice().reverse().map(function (lv) {
+    return '<div class="lv ' + lv.status + '"><span class="no">' + (lv.status === 'done' ? '✓' : lv.level) + '</span><span style="min-width:0;flex:1"><b>' + esc(lv.name) + ' <span class="tag">' + (lv.status === 'done' ? '已达到' : lv.status === 'current' ? '现在做这一层' : lv.status === 'open' ? '可并行' : '之后') + '</span></b><small>达成条件：' + esc(lv.why) + '</small>' +
+      (lv.status !== 'later' ? '<ul class="cards">' + lv.cards.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>' : '') + '</span></div>';
+  }).join('');
+  var tr = KBx.taxReliefs, used = taxUsed(), total = 0;
+  $('taxTitle').textContent = '税务减免清单 · 课税年 ' + tr.ya + '（' + (tr.ya + 1) + ' 年报税）';
+  $('taxHint').textContent = '勾选今年已经用到的项目，看看还有哪些可以用。金额是上限，实际按花费。';
+  $('taxList').innerHTML = tr.items.map(function (it) {
+    var on = !!used[it.key]; if (on) total += it.cap;
+    return '<li class="li"><label class="chk" style="flex:1"><input type="checkbox" data-tax="' + it.key + '"' + (on ? ' checked' : '') + (it.auto ? ' disabled' : '') + '> <span><b>' + esc(it.name) + '</b>' + (it.note ? '<br><small class="muted">' + esc(it.note) + '</small>' : '') + '</span></label><span class="v"><b class="num">RM ' + num(it.cap) + '</b>' + (it.per ? '<span class="st">' + esc(it.per) + '</span>' : '') + '</span></li>';
+  }).join('');
+  var all = tr.items.reduce(function (a, i) { return a + i.cap; }, 0);
+  $('taxSum').innerHTML = '已勾选项目上限合计 <b>RM ' + num(total) + '</b>，清单全部上限 RM ' + num(all) + '。按 8% 税率，每多用 RM1,000 减免约省 RM80；按 24% 约省 RM240。' + kbSrc(tr);
+  var retire = diag.retire, age = prefs().birthYear ? Number(S.month.slice(0, 4)) - Number(prefs().birthYear) : null;
+  $('epfBox').innerHTML = KBx.epf.tiers.map(function (t) {
+    var p = Math.min(100, retire / t.amount * 100);
+    return '<div class="trow"><span>' + esc(t.name) + ' RM ' + num(t.amount) + ' <span class="muted">≈ 每月 ' + num(t.monthly) + '</span></span><span class="v">' + p.toFixed(0) + '%</span><div class="bar-track"><div class="bar-fill" style="width:' + p.toFixed(0) + '%"></div></div></div>';
+  }).join('') + '<div class="muted">你家退休金合计 ' + rm(retire) + (age ? '，' + age + ' 岁' : '，填出生年份可按年龄算进度（健康指数里）') + '。雇员 11% + 雇主 12–13%；自雇 i-Saraan 政府配对 15%（每年上限 RM500）。</div>' + kbSrc(KBx.epf);
+  var bw = KBx.belanjawanku, sel = $('bwType');
+  if (!sel.options.length) sel.innerHTML = bw.households.map(function (h) { return '<option value="' + h.key + '">' + esc(h.name) + ' · RM ' + num(h.monthly) + '</option>'; }).join('');
+  var hh = bw.households.find(function (h) { return h.key === sel.value; }) || bw.households[2];
+  var mine = diag.expense;
+  $('bwBox').innerHTML = '<div class="kpi"><span>你家近 3 个月平均开销</span><b>' + rm(mine) + '</b></div><div class="kpi"><span>' + esc(hh.name) + ' 基准（巴生谷）</span><b>' + rm(hh.monthly) + '</b></div>' +
+    '<div class="muted">' + (mine > 0 ? (mine > hh.monthly ? '比基准高 ' + ((mine / hh.monthly - 1) * 100).toFixed(0) + '%' : '比基准低 ' + ((1 - mine / hh.monthly) * 100).toFixed(0) + '%') + '。' : '') + esc(bw.note) + '</div>' + kbSrc(bw);
+  var dk = KBx.debt, pk = KBx.protection;
+  $('debtKb').innerHTML = '<table class="tbl">' + dk.typicalRates.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('') + '</table><div class="muted" style="margin-top:6px">' + esc(dk.note) + '。' + esc(dk.akpk) + '</div>' +
+    '<div class="muted" style="margin-top:6px">保障：人寿保额 ≈ 年收入 × ' + pk.lifeCoverMultiple + ' + 负债 − 现金；重疾险 ≈ ' + pk.criticalIllnessYears + ' 年收入；' + esc(pk.medicalCardNote) + '；' + esc(pk.perkeso) + '。</div>' + kbSrc(dk);
+  var iv = KBx.investing;
+  $('investKb').innerHTML = '<ul class="cards" style="padding-left:16px">' + iv.principles.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' +
+    '<div class="muted" style="margin-top:6px"><b>低风险底仓：</b>' + esc(iv.lowRisk.join('、')) + '<br><b>核心长期：</b>' + esc(iv.core.join('、')) + '<br><b>卫星（≤10–15%）：</b>' + esc(iv.satellite.join('、')) + '</div>' + kbSrc(iv);
+  var es = KBx.estate, esUsed = (S.settings.estate && S.settings.estate.done) || {};
+  $('estateList').innerHTML = es.items.map(function (it, i) { return '<li class="li"><label class="chk" style="flex:1"><input type="checkbox" data-estate="' + i + '"' + (esUsed[i] ? ' checked' : '') + '> <span>' + esc(it) + '</span></label></li>'; }).join('') + '<li class="li"><span class="muted">' + kbSrc(es) + '</span></li>';
+}
+$('bwType').addEventListener('change', renderLearn);
+$('taxList').addEventListener('change', function (e) {
+  var cb = e.target.closest('[data-tax]'); if (!cb) return;
+  var tax = Object.assign({}, S.settings.tax || {}); var ya = String(window.KB.taxReliefs.ya);
+  tax[ya] = Object.assign({}, tax[ya] || {}); tax[ya][cb.dataset.tax] = cb.checked;
+  S.db.collection('settings').doc('tax').set(tax).then(function () { track('tax_tick'); }).catch(function (x) { toast(errText(x)); });
+});
+$('estateList').addEventListener('change', function (e) {
+  var cb = e.target.closest('[data-estate]'); if (!cb) return;
+  var done = Object.assign({}, (S.settings.estate && S.settings.estate.done) || {}); done[cb.dataset.estate] = cb.checked;
+  S.db.collection('settings').doc('estate').set({ done: done }).catch(function (x) { toast(errText(x)); });
 });
 
 // ---------- saving methods ----------
@@ -2740,7 +2843,7 @@ async function runImport() {
 function showTab(name) {
   S.tab = name;
   document.querySelectorAll('[data-tab]').forEach(function (b) { b.setAttribute('aria-selected', String(b.dataset.tab === name)); });
-  var moreBtn = document.querySelector('#nav [data-more]'); if (moreBtn) moreBtn.setAttribute('aria-selected', String(['report', 'plan', 'settings'].indexOf(name) >= 0));
+  var moreBtn = document.querySelector('#nav [data-more]'); if (moreBtn) moreBtn.setAttribute('aria-selected', String(['report', 'plan', 'settings', 'learn'].indexOf(name) >= 0));
   document.querySelectorAll('.view').forEach(function (v) { v.hidden = v.id !== 'v-' + name; });
   if (name === 'balances' && prefs().mode === 'lite' && S._liteJump) { S._liteJump = false; setTimeout(openBatch, 50); }
   if (name === 'ledger' && !S._ledgerOpened) { S._ledgerOpened = true; if (!$('lMonth').value) { $('lMonth').value = S.month; S.ledger.month = S.month; } }
@@ -2771,6 +2874,7 @@ function renderNow() {
   if (t === 'entry') renderRecent();
   if (t === 'ledger') renderLedger();
   if (t === 'report') renderReport();
+  if (t === 'learn') renderLearn();
   if (t === 'plan') renderPlan();
   if (t === 'settings') renderSettings();
   if (t !== 'overview') { /* overview also shown in header cards */ }
