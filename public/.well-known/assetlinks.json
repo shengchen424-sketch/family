@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.chenfamily.assets",
+    "sha256_cert_fingerprints": ["02:83:2A:86:A8:85:BF:74:35:80:4E:DA:98:48:52:E3:BE:5D:75:8B:D2:1B:D8:0D:B6:87:8E:D0:41:D8:1C:7A"]
+  }
+}]

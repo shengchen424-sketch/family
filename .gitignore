@@ -4,3 +4,10 @@ data/
 *.tmp
 node_modules/
 *.log
+android/keystore/
+android/app/
+android/build/
+android/.gradle/
+android/*.apk
+android/*.aab
+android/*.idsig

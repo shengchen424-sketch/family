@@ -1,5 +1,8 @@
 # 上架 Google Play 的路线
 
+**进度（2026-10-16）**：域名 `chen-family424.duckdns.org` + Let's Encrypt 证书已上线；`assetlinks.json` 已发布；Android 包用 Bubblewrap 在 VPS 上构建（见 `android/README.md`）。剩下：Play 开发者账号、上传 .aab、内测。
+
+
 目前的应用是一个 PWA（可安装的网页应用），数据放在自己的 VPS。要上 Play Store 有两条路，建议先走 A。
 
 ## A. 自家用：TWA 打包（Trusted Web Activity）
