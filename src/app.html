@@ -261,6 +261,14 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
         <li>平时用底部 ＋ 记每一笔开销，月底看报表</li>
       </ol>
     </div>
+    <div class="welcome" id="nextSteps" hidden>
+      <h2>账本建好了，接下来</h2>
+      <ol>
+        <li><button class="btn small primary" data-tab="entry">记第一笔开销</button> 平时有支出就记，可以拍收据</li>
+        <li><button class="btn small" data-act="new-rec">添加定期项目</button> 月供、保费、订阅等固定支出，每月自动提醒或自动入账</li>
+        <li>月底到「余额 → 本月批量更新」更新一次各账户余额</li>
+      </ol>
+    </div>
     <section class="cards" id="cards"></section>
     <div class="acts" style="justify-content:flex-start;margin:-4px 0 12px"><button class="btn small" id="shareBtn">分享本月小结</button></div>
     <div class="panel" id="budgetBox"></div>
@@ -874,6 +882,7 @@ function shareSummary() {
 function renderOverview() {
   var m = S.month, txs = txArr();
   $('welcome').hidden = Object.keys(S.accounts).length > 0;
+  $('nextSteps').hidden = !(Object.keys(S.accounts).length > 0 && !txs.length);
   var t = L.familyTotals(S.accounts, S.balances, S.rates, m);
   var biz = L.businessTotals(S.accounts, S.balances, S.rates, m);
   var cf = L.cashflow(txs, m);
@@ -1016,6 +1025,7 @@ function wizRender() {
   var h = '';
   if (st.id === 'members') {
     $('wzTitle').textContent = '欢迎';
+    h += '<div class="hint"><b>开始前准备好这些，填起来只要 10 分钟：</b><br>· 各银行 App（看余额）<br>· EPF i-Akaun（看总额）<br>· 保单年度报表（看现金价值）<br>· 贷款 statement 或银行 App（看剩余本金、月供）<br>· 房和车的大概市价（不确定先估，之后随时改）</div>';
     h += '<p class="q">家里有谁会用这个账本？</p><div class="hint">每个人记的账都会标上名字，月底能看每个人花了多少。之后还可以在设置里添加。</div>';
     h += '<div class="chipsx" id="wzMembers">' + W.members.map(function (m, i) { return '<span>' + esc(m) + '<button type="button" data-rm="' + i + '" aria-label="移除">×</button></span>'; }).join('') + '</div>';
     h += '<div class="racts"><input id="wzMemberInput" type="text" maxlength="20" placeholder="名字，例如 Liza" style="flex:1"><button class="btn small" type="button" id="wzMemberAdd">添加</button></div>';
