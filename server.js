@@ -4,7 +4,8 @@
  *
  * 启动：
  *   FAMILY_KEYS="密钥1:Chen,密钥2:Liza" PORT=8443 TLS_CERT=/path/cert.pem TLS_KEY=/path/key.pem node server.js
- *   密钥也可以放在 data/keys.txt（每行 "密钥:名字"），这样不用写进 systemd 单元。两处都没有时自动生成 owner 密钥。
+ *   密钥也可以放在 data/keys.txt（每行 "密钥:名字" 或 "密钥:名字:家庭编号"），这样不用写进 systemd 单元。两处都没有时自动生成 owner 密钥。
+ *   多家庭：家庭编号不同的密钥看到完全独立的数据（data/families/<编号>/），默认家庭用 data/ 本身。每个家庭第一把密钥的人是该家庭的 owner。
  *   不设 TLS_CERT / TLS_KEY 时以 HTTP 运行（只建议在内网或前面有反向代理时使用）。
  *
  * 访问：第一次打开 https://你的IP:8443/?k=密钥 ，之后浏览器会记住，不用再输入。
@@ -20,8 +21,13 @@ const crypto = require('crypto');
 const PORT = Number(process.env.PORT || 8443);
 const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
-const RECEIPT_DIR = path.join(DATA_DIR, 'receipts');
-const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+const DEFAULT_FAMILY = 'default';
+function famDir(fam) { return fam === DEFAULT_FAMILY ? DATA_DIR : path.join(DATA_DIR, 'families', fam); }
+function receiptDir(fam) { const d = path.join(famDir(fam), 'receipts'); fs.mkdirSync(d, { recursive: true }); return d; }
+function backupDir(fam) { return path.join(famDir(fam), 'backups'); }
+// Plans: a family's settings doc "plan" {tier:'free'|'pro', until}. No doc = pro (self-hosted families are never limited).
+// Billing (Google Play) will call setPlan when it goes live; FREE_LIMITS is what the free tier gets.
+const FREE_LIMITS = { accounts: 8, receipts: false };
 const COLLECTIONS = ['accounts', 'balances', 'rates', 'tx', 'recurring', 'categories', 'members', 'reminders', 'snapshots', 'audit', 'goals', 'settings'];
 const MAX_BODY = 12 * 1024 * 1024;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -41,7 +47,7 @@ const SEED = loadSeed();
 function buildId() { try { return crypto.createHash('sha1').update(fs.readFileSync(PAGE)).digest('hex').slice(0, 10); } catch (e) { return 'dev'; } }
 const STATIC_TYPES = { '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.js': 'application/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
 
-fs.mkdirSync(RECEIPT_DIR, { recursive: true });
+fs.mkdirSync(path.join(DATA_DIR, 'receipts'), { recursive: true });
 
 // ---------- access keys: one key per person, so the audit log shows who changed what ----------
 // Keys come from FAMILY_KEYS ("key:Name,key2:Name2") and/or DATA_DIR/keys.txt (one "key:Name" per line,
@@ -49,8 +55,11 @@ fs.mkdirSync(RECEIPT_DIR, { recursive: true });
 const KEYS_FILE = path.join(DATA_DIR, 'keys.txt');
 function addPairs(map, text, sep) {
   String(text || '').split(sep).map(s => s.trim()).filter(s => s && s[0] !== '#').forEach(pair => {
-    const i = pair.indexOf(':');
-    if (i > 0 && pair.slice(0, i).trim().length >= 6) map[pair.slice(0, i).trim()] = pair.slice(i + 1).trim();
+    const parts = pair.split(':').map(x => x.trim());
+    if (parts.length >= 2 && parts[0].length >= 6 && parts[1]) {
+      const fam = (parts[2] || DEFAULT_FAMILY).replace(/[^\w-]/g, '') || DEFAULT_FAMILY;
+      map[parts[0]] = { name: parts[1], family: fam };
+    }
   });
 }
 function loadKeys() {
@@ -67,13 +76,19 @@ function loadKeys() {
       fs.writeFileSync(keyFile, key + '\n', { mode: 0o600 });
       console.log('已生成访问密钥（请保存）：' + key + '  （保存在 ' + keyFile + '）');
     }
-    map[key] = 'Chen';
+    map[key] = { name: 'Chen', family: DEFAULT_FAMILY };
   }
   return map;
 }
 const KEYS = loadKeys();
-// The owner (first key's name, or FAMILY_OWNER) may restore backups and manage members; everyone may record.
-const OWNER = process.env.FAMILY_OWNER || KEYS[Object.keys(KEYS)[0]];
+// Each family's owner = the person on its first key (FAMILY_OWNER overrides for the default family).
+// Owners may restore backups; everyone may record.
+const OWNERS = {};
+Object.keys(KEYS).forEach(k => { const e = KEYS[k]; if (!OWNERS[e.family]) OWNERS[e.family] = e.name; });
+if (process.env.FAMILY_OWNER) OWNERS[DEFAULT_FAMILY] = process.env.FAMILY_OWNER;
+const OWNER = OWNERS[DEFAULT_FAMILY];
+function families() { return Object.keys(OWNERS); }
+function ctxFor(key) { const e = KEYS[key]; return { me: e.name, family: e.family, owner: e.name === OWNERS[e.family], operator: e.family === DEFAULT_FAMILY && e.name === OWNER }; }
 const Logic = require('./src/logic.js');
 
 // Brute-force protection: after MAX_FAILS wrong keys from one address within WINDOW, that address waits BLOCK_MS.
@@ -110,19 +125,28 @@ const CLEAR_COOKIE = 'k=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0';
 
 // ---------- document store (one JSON file per collection, written atomically) ----------
 const cache = {};
-function load(name) {
-  if (cache[name]) return cache[name];
-  const file = path.join(DATA_DIR, name + '.json');
+function load(fam, name) {
+  const k = fam + '/' + name;
+  if (cache[k]) return cache[k];
+  const file = path.join(famDir(fam), name + '.json');
   let obj = {};
   try { obj = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { obj = {}; }
-  cache[name] = obj;
+  cache[k] = obj;
   return obj;
 }
-function save(name) {
-  const file = path.join(DATA_DIR, name + '.json');
+function save(fam, name) {
+  const dir = famDir(fam);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, name + '.json');
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(cache[name]));
+  fs.writeFileSync(tmp, JSON.stringify(cache[fam + '/' + name]));
   fs.renameSync(tmp, file);
+}
+function planOf(fam) {
+  const p = load(fam, 'settings').plan;
+  if (!p || !p.tier) return { tier: 'pro' };
+  if (p.tier === 'pro' && p.until && p.until < Logic.todayKuching()) return { tier: 'free', until: p.until, expired: true };
+  return p;
 }
 // serialise writes so two phones saving at once cannot interleave
 let queue = Promise.resolve();
@@ -168,87 +192,92 @@ function pruneAudit(m) {
   ids.sort((a, b) => String(m[a].at || '').localeCompare(String(m[b].at || '')));
   ids.slice(0, ids.length - AUDIT_MAX).forEach(id => { delete m[id]; });
 }
-function removeReceipt(fileId) {
+function removeReceipt(fam, fileId) {
   if (!/^[a-f0-9]{24}$/.test(String(fileId || ''))) return;
-  ['.bin', '.type'].forEach(ext => { try { fs.unlinkSync(path.join(RECEIPT_DIR, fileId + ext)); } catch (e) { /* already gone */ } });
+  ['.bin', '.type'].forEach(ext => { try { fs.unlinkSync(path.join(receiptDir(fam), fileId + ext)); } catch (e) { /* already gone */ } });
 }
 
+// Every API function receives ctx = { me, family, owner, operator } first; the HTTP layer builds it from the key.
 const API = {
-  getMe(ctx) { return { name: ctx.me, owner: ctx.me === OWNER }; },
+  getMe(ctx) { return { name: ctx.me, owner: ctx.owner, family: ctx.family, plan: planOf(ctx.family), operator: ctx.operator }; },
 
-  getSnapshot(names) {
+  getSnapshot(ctx, names) {
     const out = {};
     (names || COLLECTIONS).forEach(n => {
       assertName(n);
-      const m = load(n);
+      const m = load(ctx.family, n);
       out[n] = Object.keys(m).map(id => ({ id, data: m[id] }));
     });
     return out;
   },
 
-  setDoc(name, id, data) {
+  setDoc(ctx, name, id, data) {
     assertName(name);
     if (!id || typeof id !== 'string' || id.length > 120) throw new Error('缺少编号');
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('数据格式不正确');
     validateDoc(name, data);
+    if (name === 'settings' && id === 'plan') throw new Error('方案由系统设置');
     return serial(() => {
-      const m = load(name);
+      const m = load(ctx.family, name);
+      if (name === 'accounts' && !m[id] && planOf(ctx.family).tier === 'free' && Object.keys(m).length >= FREE_LIMITS.accounts) throw new Error('免费版最多 ' + FREE_LIMITS.accounts + ' 个账户，升级后不限');
       m[id] = data;
       if (name === 'audit') pruneAudit(m);
-      save(name);
+      save(ctx.family, name);
       return true;
     });
   },
 
-  delDoc(name, id) {
+  delDoc(ctx, name, id) {
     assertName(name);
     return serial(() => {
-      const m = load(name);
+      const m = load(ctx.family, name);
       const old = m[id];
       delete m[id];
-      save(name);
-      if (name === 'tx' && old && old.receiptId) removeReceipt(old.receiptId);
+      save(ctx.family, name);
+      if (name === 'tx' && old && old.receiptId) removeReceipt(ctx.family, old.receiptId);
       return true;
     });
   },
 
-  uploadReceipt(dataUrl) {
+  uploadReceipt(ctx, dataUrl) {
+    if (planOf(ctx.family).tier === 'free' && !FREE_LIMITS.receipts) throw new Error('收据照片是付费版功能');
     const m = String(dataUrl || '').match(/^data:(image\/(?:jpeg|png|webp|heic|heif));base64,(.*)$/);
     if (!m) throw new Error('图片格式不正确');
     const bytes = Buffer.from(m[2], 'base64');
     if (bytes.length > 4 * 1024 * 1024) throw new Error('图片太大');
     const id = crypto.randomBytes(12).toString('hex');
-    fs.writeFileSync(path.join(RECEIPT_DIR, id + '.bin'), bytes);
-    fs.writeFileSync(path.join(RECEIPT_DIR, id + '.type'), m[1]);
+    const dir = receiptDir(ctx.family);
+    fs.writeFileSync(path.join(dir, id + '.bin'), bytes);
+    fs.writeFileSync(path.join(dir, id + '.type'), m[1]);
     return { fileId: id };
   },
 
-  getSeed() { return SEED; },
+  getSeed(ctx) { return ctx.family === DEFAULT_FAMILY ? SEED : { accounts: [], rate: null, month: null }; },
 
   // Full backup / restore. Restore merges document by document (existing ids are overwritten, nothing is deleted).
-  exportAll() { return API.getSnapshot(COLLECTIONS); },
+  exportAll(ctx) { return API.getSnapshot(ctx, COLLECTIONS); },
   importAll(ctx, data) {
-    if (ctx.me !== OWNER) throw new Error('只有 ' + OWNER + ' 可以恢复备份');
+    if (!ctx.owner) throw new Error('只有 ' + OWNERS[ctx.family] + ' 可以恢复备份');
     if (!data || typeof data !== 'object') throw new Error('备份格式不正确');
     return serial(() => {
       let n = 0;
       Object.keys(data).forEach(name => {
         if (!COLLECTIONS.includes(name) || !Array.isArray(data[name])) return;
-        const m = load(name);
+        const m = load(ctx.family, name);
         data[name].forEach(r => { if (r && typeof r.id === 'string' && r.data && typeof r.data === 'object') { m[r.id] = r.data; n++; } });
-        save(name);
+        save(ctx.family, name);
       });
       return { imported: n };
     });
   },
 
-  listBackups() {
-    try { return fs.readdirSync(BACKUP_DIR).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse(); } catch (e) { return []; }
+  listBackups(ctx) {
+    try { return fs.readdirSync(backupDir(ctx.family)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse(); } catch (e) { return []; }
   },
   restoreBackup(ctx, day) {
-    if (ctx.me !== OWNER) throw new Error('只有 ' + OWNER + ' 可以恢复备份');
+    if (!ctx.owner) throw new Error('只有 ' + OWNERS[ctx.family] + ' 可以恢复备份');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ''))) throw new Error('日期不正确');
-    const dir = path.join(BACKUP_DIR, day);
+    const dir = path.join(backupDir(ctx.family), day);
     if (!fs.existsSync(dir)) throw new Error('没有这一天的备份');
     const data = {};
     COLLECTIONS.forEach(n => {
@@ -260,11 +289,31 @@ const API = {
     return API.importAll(ctx, data);
   },
 
-  getReceipt(fileId) {
+  getReceipt(ctx, fileId) {
     if (!/^[a-f0-9]{24}$/.test(String(fileId || ''))) throw new Error('编号不正确');
-    const bin = path.join(RECEIPT_DIR, fileId + '.bin');
-    const type = fs.readFileSync(path.join(RECEIPT_DIR, fileId + '.type'), 'utf8');
+    const dir = receiptDir(ctx.family);
+    const bin = path.join(dir, fileId + '.bin');
+    if (!fs.existsSync(bin)) throw new Error('找不到收据');
+    const type = fs.readFileSync(path.join(dir, fileId + '.type'), 'utf8');
     return 'data:' + type + ';base64,' + fs.readFileSync(bin).toString('base64');
+  },
+
+  // Operator only (owner of the default family): set a family's plan. Billing webhooks will call this.
+  setPlan(ctx, family, tier, until) {
+    if (!ctx.operator) throw new Error('只有运营者可以设置方案');
+    if (!OWNERS[family]) throw new Error('没有这个家庭');
+    if (!['free', 'pro'].includes(tier)) throw new Error('方案只能是 free 或 pro');
+    if (until && !Logic.isDate(until)) throw new Error('到期日不正确');
+    return serial(() => {
+      const st = load(family, 'settings');
+      st.plan = { tier, until: until || null, setAt: new Date().toISOString(), by: ctx.me };
+      save(family, 'settings');
+      return st.plan;
+    });
+  },
+  listFamilies(ctx) {
+    if (!ctx.operator) throw new Error('只有运营者可以查看');
+    return families().map(f => ({ family: f, owner: OWNERS[f], members: Object.keys(KEYS).filter(k => KEYS[k].family === f).map(k => KEYS[k].name), plan: planOf(f), accounts: Object.keys(load(f, 'accounts')).length }));
   }
 };
 
@@ -347,7 +396,7 @@ async function handle(req, res) {
     try {
       const body = JSON.parse((await readBody(req)) || '{}');
       const args = Array.isArray(body.args) ? body.args : [];
-      const result = await API[fn]({ me: KEYS[key] }, ...args.slice(0, 4).map(a => a));
+      const result = await API[fn](ctxFor(key), ...args.slice(0, 4).map(a => a));
       return send(res, 200, JSON.stringify({ ok: true, result: result === undefined ? null : result }), { 'Content-Type': 'application/json' });
     } catch (e) {
       return send(res, 200, JSON.stringify({ ok: false, error: String(e && e.message || e) }), { 'Content-Type': 'application/json' });
@@ -357,34 +406,28 @@ async function handle(req, res) {
   send(res, 404, 'Not found', { 'Content-Type': 'text/plain; charset=utf-8' });
 }
 
-// Functions that need the caller as first argument are wrapped above; the rest take their arguments directly.
-for (const fn of Object.keys(API)) {
-  if (fn === 'getMe' || fn === 'importAll' || fn === 'restoreBackup') continue;
-  const raw = API[fn];
-  API[fn] = (ctx, ...args) => raw(...args);
-}
-
 // ---------- automatic month-end snapshot ----------
 // On the first run of a new month (checked every 6 h), lock last month's family totals if nobody did it by hand.
 function withIds(m) { const o = {}; Object.keys(m).forEach(id => { o[id] = Object.assign({}, m[id], { id }); }); return o; }
-function autoSnapshot() {
+function autoSnapshot() { families().forEach(autoSnapshotFor); }
+function autoSnapshotFor(fam) {
   try {
     const prev = Logic.addMonths(Logic.nowMonth(), -1);
-    const snaps = load('snapshots');
+    const snaps = load(fam, 'snapshots');
     if (snaps[prev]) return;
-    const balances = load('balances');
+    const balances = load(fam, 'balances');
     if (!Object.keys(balances).some(k => balances[k].month <= prev)) return;
-    const accs = withIds(load('accounts')), rates = load('rates');
+    const accs = withIds(load(fam, 'accounts')), rates = load(fam, 'rates');
     const t = Logic.familyTotals(accs, balances, rates, prev);
     const biz = Logic.businessTotals(accs, balances, rates, prev);
     serial(() => {
       const r2 = n => Math.round(n * 100) / 100;
       snaps[prev] = { month: prev, assets: r2(t.assets), liabs: r2(t.liabs), net: r2(t.net), liquid: r2(t.liquid), bizNet: r2(biz.net), missing: t.missing, lockedAt: new Date().toISOString(), byId: 'auto', auto: true };
-      save('snapshots');
-      const audit = load('audit');
+      save(fam, 'snapshots');
+      const audit = load(fam, 'audit');
       audit['auto-' + prev] = { at: new Date().toISOString(), byId: 'auto', action: '自动月结', ref: prev, summary: prev + ' 净资产 RM ' + r2(t.net).toLocaleString('en-MY') };
-      save('audit');
-      console.log('已自动锁定 ' + prev + ' 快照');
+      save(fam, 'audit');
+      console.log('[' + fam + '] 已自动锁定 ' + prev + ' 快照');
     });
   } catch (e) { console.error('自动月结失败', e); }
 }
@@ -392,15 +435,16 @@ setTimeout(autoSnapshot, 5000);
 setInterval(autoSnapshot, 6 * 3600e3).unref();
 
 // ---------- automatic posting of recurring items flagged autoPost (checked hourly) ----------
-function autoPostRecurring() {
+function autoPostRecurring() { families().forEach(autoPostFor); }
+function autoPostFor(fam) {
   try {
     const today = Logic.todayKuching(), m = today.slice(0, 7);
-    const recs = withIds(load('recurring')), txm = load('tx');
+    const recs = withIds(load(fam, 'recurring')), txm = load(fam, 'tx');
     const txs = Object.keys(txm).map(id => Object.assign({}, txm[id], { id }));
     const due = Logic.dueAutoPost(Object.keys(recs).map(k => recs[k]), txs, today);
     if (!due.length) return;
     serial(() => {
-      const audit = load('audit');
+      const audit = load(fam, 'audit');
       due.forEach(it => {
         const tx = Logic.txFromRecurring(it, m);
         tx.member = tx.member || 'shared';
@@ -409,8 +453,8 @@ function autoPostRecurring() {
         txm[it.key] = tx;
         audit['auto-' + it.key] = { at: tx.createdAt, byId: 'auto', action: '自动入账', ref: it.key, summary: (it.rec.name || '') + ' RM ' + tx.amount };
       });
-      save('tx'); save('audit');
-      console.log('自动入账 ' + due.length + ' 笔');
+      save(fam, 'tx'); save(fam, 'audit');
+      console.log('[' + fam + '] 自动入账 ' + due.length + ' 笔');
     });
   } catch (e) { console.error('自动入账失败', e); }
 }
@@ -418,14 +462,16 @@ setTimeout(autoPostRecurring, 8000);
 setInterval(autoPostRecurring, 3600e3).unref();
 
 // ---------- daily on-disk backup of the JSON collections (last 30 days kept) ----------
-function dailyBackup() {
+function dailyBackup() { families().forEach(dailyBackupFor); }
+function dailyBackupFor(fam) {
   try {
-    const day = Logic.todayKuching();
-    const dir = path.join(BACKUP_DIR, day);
+    const day = Logic.todayKuching(), bdir = backupDir(fam);
+    const dir = path.join(bdir, day);
     if (fs.existsSync(dir)) return;
+    if (!COLLECTIONS.some(n => fs.existsSync(path.join(famDir(fam), n + '.json')))) return;
     fs.mkdirSync(dir, { recursive: true });
-    COLLECTIONS.forEach(n => { const f = path.join(DATA_DIR, n + '.json'); if (fs.existsSync(f)) fs.copyFileSync(f, path.join(dir, n + '.json')); });
-    fs.readdirSync(BACKUP_DIR).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().slice(0, -30).forEach(d => fs.rmSync(path.join(BACKUP_DIR, d), { recursive: true, force: true }));
+    COLLECTIONS.forEach(n => { const f = path.join(famDir(fam), n + '.json'); if (fs.existsSync(f)) fs.copyFileSync(f, path.join(dir, n + '.json')); });
+    fs.readdirSync(bdir).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().slice(0, -30).forEach(d => fs.rmSync(path.join(bdir, d), { recursive: true, force: true }));
   } catch (e) { console.error('备份失败', e); }
 }
 setTimeout(dailyBackup, 3000);
@@ -434,8 +480,6 @@ setInterval(dailyBackup, 6 * 3600e3).unref();
 // ---------- SGD→MYR rate for the current month, fetched once a day unless someone typed one by hand ----------
 function fetchRate() {
   const m = Logic.nowMonth();
-  const rates = load('rates');
-  if (rates[m] && !rates[m].auto) return;
   const req = https.get('https://open.er-api.com/v6/latest/SGD', { timeout: 10000 }, res => {
     let body = '';
     res.on('data', c => { body += c; });
@@ -444,7 +488,13 @@ function fetchRate() {
         const j = JSON.parse(body);
         const r = j && j.rates && Number(j.rates.MYR);
         if (!(r > 0)) return;
-        serial(() => { rates[m] = { sgdMyr: Math.round(r * 10000) / 10000, auto: true, updatedAt: new Date().toISOString(), source: 'open.er-api.com' }; save('rates'); });
+        serial(() => {
+          families().forEach(fam => {
+            const rates = load(fam, 'rates');
+            if (rates[m] && !rates[m].auto) return;
+            rates[m] = { sgdMyr: Math.round(r * 10000) / 10000, auto: true, updatedAt: new Date().toISOString(), source: 'open.er-api.com' }; save(fam, 'rates');
+          });
+        });
       } catch (e) { /* ignore bad payload */ }
     });
   });
@@ -457,4 +507,4 @@ server.listen(PORT, HOST, () => {
   console.log('家庭资产服务已启动：' + scheme + '://' + HOST + ':' + PORT + '  数据目录：' + DATA_DIR);
 });
 
-module.exports = { API, KEYS, DATA_DIR, OWNER, autoSnapshot, autoPostRecurring, dailyBackup, server };
+module.exports = { API, KEYS, DATA_DIR, OWNER, OWNERS, families, autoSnapshot, autoPostRecurring, dailyBackup, server };

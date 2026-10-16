@@ -68,3 +68,11 @@ bash scripts/keys.sh remove-temp   # 删除 systemd 单元里的临时密钥 Che
 6. 确认页显示将建立的账户和净资产，保存后直接进入总览。
 
 类型清单和构建逻辑在 `src/logic.js` 的 `SETUP_TYPES` / `buildSetup`，有单元测试。
+
+## 多家庭（多用户）与方案
+
+- `data/keys.txt` 每行 `密钥:名字:家庭编号`，没有家庭编号的属于默认家庭（数据在 `data/` 本身）。其他家庭的数据在 `data/families/<编号>/`，各自有收据、每日备份、自动月结、自动入账、汇率；完全隔离，互相看不到。
+- 每个家庭第一把密钥的人是该家庭 owner（可恢复备份）。默认家庭的 owner 是运营者，可调用 `setPlan(家庭, free|pro, 到期日)` 和 `listFamilies()`。
+- 方案：没有设置就是完整版（自家用永远不限）。设为 `free` 后：最多 8 个账户、不能上传收据照片；到期日过了自动降为免费版。页面设置里显示当前方案。
+- 付费订阅的接法：Android 版接 Google Play Billing，购买成功后由后端验证收据并调用 `setPlan(家庭, 'pro', 到期日)`；续费同样更新到期日。这一步要等 Android 打包（需要域名）之后做。
+- 新家庭开通：`bash scripts/keys.sh add "名字" 家庭编号`，把生成的链接发给对方即可；对方第一次打开会进入新手引导。

@@ -9,7 +9,7 @@ const http = require('http');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'family-test-'));
 process.env.PORT = '0'; process.env.HOST = '127.0.0.1'; process.env.DATA_DIR = dir;
-process.env.FAMILY_KEYS = 'ownerkey123:Chen,lizakey456:Liza'; process.env.FAMILY_NO_FETCH = '1';
+process.env.FAMILY_KEYS = 'ownerkey123:Chen,lizakey456:Liza,tankey7890:Ah Tan:tan,tanwife001:Mei:tan'; process.env.FAMILY_NO_FETCH = '1';
 delete process.env.TLS_CERT; delete process.env.TLS_KEY;
 const srv = require('../server.js');
 
@@ -42,10 +42,10 @@ const api = (fn, args, key) => req('POST', '/api/' + fn + (key ? '?k=' + key : '
   await t('valid ?k= sets a cookie and identifies the person; owner flag only for the first key', async () => {
     const page = await req('GET', '/?k=ownerkey123');
     assert.ok(/^k=ownerkey123;/.test(page.headers['set-cookie'][0]));
-    const me = await api('getMe', [], 'ownerkey123');
-    assert.deepStrictEqual(me.j.result, { name: 'Chen', owner: true });
-    const liza = await api('getMe', [], 'lizakey456');
-    assert.deepStrictEqual(liza.j.result, { name: 'Liza', owner: false });
+    const me = (await api('getMe', [], 'ownerkey123')).j.result;
+    assert.deepStrictEqual({ name: me.name, owner: me.owner, family: me.family, operator: me.operator }, { name: 'Chen', owner: true, family: 'default', operator: true });
+    const liza = (await api('getMe', [], 'lizakey456')).j.result;
+    assert.deepStrictEqual({ name: liza.name, owner: liza.owner }, { name: 'Liza', owner: false });
     const viaCookie = await req('POST', '/api/getMe', { args: [] }, { cookie: 'k=lizakey456' });
     assert.strictEqual(JSON.parse(viaCookie.body).result.name, 'Liza');
   });
@@ -123,6 +123,41 @@ const api = (fn, args, key) => req('POST', '/api/' + fn + (key ? '?k=' + key : '
     assert.strictEqual(days.length, 1);
     assert.ok(fs.existsSync(path.join(dir, 'backups', days[0], 'tx.json')));
     srv.autoSnapshot();
+  });
+
+  await t('families are isolated: data, owners, receipts, backups', async () => {
+    const tan = await api('getMe', [], 'tankey7890');
+    assert.deepStrictEqual({ name: tan.j.result.name, owner: tan.j.result.owner, family: tan.j.result.family, operator: tan.j.result.operator }, { name: 'Ah Tan', owner: true, family: 'tan', operator: false });
+    assert.strictEqual((await api('getMe', [], 'tanwife001')).j.result.owner, false);
+    assert.strictEqual((await api('getSnapshot', [['tx']], 'tankey7890')).j.result.tx.length, 0, 'tan family sees none of the default family data');
+    await api('setDoc', ['accounts', 'tan-1', { name: 'Tan Maybank', kind: 'asset', group: 'family', currency: 'MYR', category: '现金与定存' }], 'tanwife001');
+    assert.strictEqual((await api('getSnapshot', [['accounts']], 'ownerkey123')).j.result.accounts.length, 0, 'default family does not see tan accounts');
+    assert.ok(fs.existsSync(path.join(dir, 'families', 'tan', 'accounts.json')));
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC';
+    const up = await api('uploadReceipt', [png], 'tankey7890');
+    assert.ok(fs.existsSync(path.join(dir, 'families', 'tan', 'receipts', up.j.result.fileId + '.bin')));
+    assert.ok(/找不到收据/.test((await api('getReceipt', [up.j.result.fileId], 'ownerkey123')).j.error), 'other family cannot read it');
+    assert.strictEqual((await api('getSeed', [], 'tankey7890')).j.result.accounts.length, 0, 'seed workbook is only for the default family');
+    assert.ok(/只有 Ah Tan/.test((await api('importAll', [{}], 'tanwife001')).j.error));
+    srv.dailyBackup();
+    assert.ok(fs.existsSync(path.join(dir, 'families', 'tan', 'backups')));
+  });
+
+  await t('plans: operator sets a family to free, limits apply, pro lifts them', async () => {
+    assert.ok(/运营者/.test((await api('setPlan', ['tan', 'free'], 'tankey7890')).j.error));
+    assert.strictEqual((await api('setPlan', ['tan', 'free'], 'ownerkey123')).j.result.tier, 'free');
+    assert.strictEqual((await api('getMe', [], 'tankey7890')).j.result.plan.tier, 'free');
+    for (let i = 2; i <= 8; i++) await api('setDoc', ['accounts', 'tan-' + i, { name: 'A' + i, kind: 'asset', group: 'family', currency: 'MYR' }], 'tankey7890');
+    const ninth = await api('setDoc', ['accounts', 'tan-9', { name: 'A9', kind: 'asset', group: 'family', currency: 'MYR' }], 'tankey7890');
+    assert.ok(/免费版最多 8 个账户/.test(ninth.j.error));
+    assert.ok(/付费版/.test((await api('uploadReceipt', ['data:image/png;base64,iVBORw0KGgo='], 'tankey7890')).j.error));
+    assert.ok(/系统设置/.test((await api('setDoc', ['settings', 'plan', { tier: 'pro' }], 'tankey7890')).j.error), 'families cannot upgrade themselves');
+    assert.strictEqual((await api('setPlan', ['tan', 'pro', '2027-12-31'], 'ownerkey123')).j.result.tier, 'pro');
+    assert.strictEqual((await api('setDoc', ['accounts', 'tan-9', { name: 'A9', kind: 'asset', group: 'family', currency: 'MYR' }], 'tankey7890')).j.ok, true);
+    const fams = (await api('listFamilies', [], 'ownerkey123')).j.result;
+    assert.deepStrictEqual(fams.map(f => f.family).sort(), ['default', 'tan']);
+    assert.strictEqual(fams.find(f => f.family === 'tan').accounts, 9);
+    assert.strictEqual((await api('getMe', [], 'lizakey456')).j.result.plan.tier, 'pro', 'default family is never limited');
   });
 
   await t('wrong keys are throttled after 8 attempts, then even the right key waits', async () => {

@@ -545,7 +545,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     <div class="panel">
       <h2>使用说明</h2>
       <div class="acts" style="justify-content:flex-start"><button class="btn" id="helpBtn">打开使用说明</button></div>
-      <p class="muted" style="margin-top:8px">版本 <span id="buildId">__BUILD__</span></p>
+      <p class="muted" style="margin-top:8px">版本 <span id="buildId">__BUILD__</span><span id="planInfo"></span></p>
     </div>
 
     <div class="panel">
@@ -2175,8 +2175,11 @@ async function lockSnapshot(btn) {
   } catch (e) { toast(errText(e)); }
 }
 function renderSettings() {
-  $('seedPanel').hidden = Object.keys(S.accounts).length > 0;
+  var meNow = window.Api && window.Api.me ? window.Api.me() : null;
+  $('seedPanel').hidden = Object.keys(S.accounts).length > 0 || !!(meNow && meNow.family && meNow.family !== 'default');
   $('restoreLbl').hidden = !(window.Api && window.Api.isOwner());
+  var who = window.Api && window.Api.me ? window.Api.me() : null;
+  $('planInfo').textContent = who && who.plan ? ' · ' + (who.plan.tier === 'pro' ? '完整版' : '免费版（最多 8 个账户，无收据照片）') + (who.family && who.family !== 'default' ? ' · 家庭 ' + who.family : '') : '';
   $('healthList').innerHTML = L.healthCheck({ accounts: S.accounts, balances: S.balances, tx: txArr(), recurring: recArr(), goals: arr(S.goals), categories: catList(), month: S.month })
     .map(function (x) { return '<div><i class="' + (x.level === 'ok' ? 'ok' : x.level === 'warn' ? 'warn' : '') + '"></i><span>' + esc(x.text) + '</span></div>'; }).join('');
   var inactive = arr(S.accounts).filter(function (a) { return a.active === false; });

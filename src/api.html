@@ -110,7 +110,7 @@ var Api = (function () {
   }
 
   var db = { collection: function (name) { return Col(name, {}); } };
-  var me = '', mePromise = null, isOwner = false, lastOffline = false;
+  var me = '', mePromise = null, isOwner = false, lastOffline = false, meInfo = null;
   var user = {
     id: function () { return (mePromise || Promise.resolve()).then(function () { return me || null; }); },
     profiles: function (ids) {
@@ -125,7 +125,7 @@ var Api = (function () {
   function start(onReady, onError) {
     mePromise = new Promise(function (resolve) {
       google.script.run.withSuccessHandler(function (who) {
-        if (who && typeof who === 'object') { me = who.name || ''; isOwner = !!who.owner; } else { me = who || ''; isOwner = true; }
+        if (who && typeof who === 'object') { me = who.name || ''; isOwner = !!who.owner; meInfo = who; } else { me = who || ''; isOwner = true; meInfo = { name: me, owner: true }; }
         resolve();
       }).withFailureHandler(function () { resolve(); }).getMe();
     });
@@ -140,7 +140,7 @@ var Api = (function () {
   }
 
   return {
-    db: db, user: user, start: start, refresh: refresh, isOwner: function () { return isOwner; },
+    db: db, user: user, start: start, refresh: refresh, isOwner: function () { return isOwner; }, me: function () { return meInfo; },
     pending: function () { return inflight; },
     receiptUpload: function (dataUrl, name) {
       return new Promise(function (resolve, reject) {
