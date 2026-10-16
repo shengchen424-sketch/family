@@ -321,7 +321,7 @@ const API = {
 function send(res, code, body, headers) {
   res.writeHead(code, Object.assign({
     'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'self'"
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'self'"
   }, headers || {}));
   res.end(body);
 }
@@ -371,10 +371,12 @@ async function handle(req, res) {
   }
 
   if (req.method === 'GET' && url.pathname.startsWith('/vendor/')) {
-    const name = path.basename(url.pathname);
-    const file = path.join(VENDOR_DIR, name);
-    if (!/^[\w.-]+\.js$/.test(name) || !fs.existsSync(file)) return send(res, 404, 'Not found', { 'Content-Type': 'text/plain; charset=utf-8' });
-    return send(res, 200, fs.readFileSync(file), { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=604800' });
+    const rel = url.pathname.slice('/vendor/'.length);
+    const file = path.join(VENDOR_DIR, rel);
+    const VENDOR_TYPES = { '.js': 'application/javascript; charset=utf-8', '.gz': 'application/gzip', '.wasm': 'application/wasm', '.json': 'application/json' };
+    const type = VENDOR_TYPES[path.extname(rel)];
+    if (!/^[\w.-]+(\/[\w.-]+)?$/.test(rel) || !type || !fs.existsSync(file) || !fs.statSync(file).isFile()) return send(res, 404, 'Not found', { 'Content-Type': 'text/plain; charset=utf-8' });
+    return send(res, 200, fs.readFileSync(file), { 'Content-Type': type, 'Cache-Control': 'public, max-age=604800' });
   }
   if (req.method === 'GET' && url.pathname === '/favicon.ico') return send(res, 204, '');
   // Logout: the cookie is HttpOnly, so only the server can clear it; then back to the login screen.

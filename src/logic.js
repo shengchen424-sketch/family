@@ -974,6 +974,66 @@
     return { amount: isFinite(amount) ? round2(amount) : NaN, note: note };
   }
 
+  // ---------- receipt OCR text → amount / date / merchant / category (rules, no AI service) ----------
+  var MERCHANT_WORDS = [
+    ['饮食', 'giant|tesco|lotus|lotuss|everrise|mydin|econsave|aeon|jaya grocer|village grocer|99 speedmart|speedmart|speed mart|ck mart|emart|farley|ta kiong|unaco|supermarket|hypermarket|pasar|mamak|restoran|restaurant|cafe|kopitiam|bakery|kfc|mcdonald|mcd|pizza|domino|dominos|starbucks|zus|tealive|chatime|sushi|nasi|mee|kopi|food|bistro|dim sum|hawker|coffee|cafe|bak kut teh|laksa|kolo'],
+    ['水电网', 'tnb|tenaga nasional|sarawak energy|sesco|kuching water|laku|indah water|unifi|telekom|maxis|celcom|celcomdigi|digi|u mobile|yes 4g|astro|netflix|spotify|youtube premium|icloud|google one|time dotcom|streamyx|internet|broadband|electric|elektrik|water bill|bil air'],
+    ['交通与油费', 'petronas|shell|petron|caltex|bhp|grab|touch n go|touchngo|tng|toll|plus|parking|parkir|car park|carpark|lrt|mrt|ktm|rapidkl|rapid|bus|airasia|malaysia airlines|flight|taxi|e-hailing|ron95|ron97|diesel|petrol|fuel|minyak'],
+    ['日用', 'mr diy|mr d i y|mrdiy|watsons|guardian|daiso|eco shop|ecoshop|ikea|homepro|hardware|pharmacy|farmasi|caring|alpro|big pharmacy|shopee|lazada|taobao|temu|uniqlo|padini|h&m|brands outlet|toiletries|detergent'],
+    ['医疗', 'clinic|klinik|hospital|medical|dental|dentist|poliklinik|specialist|optical|optometrist|doctor|dr\\.'],
+    ['孩子', 'tadika|kindergarten|school|sekolah|tuition|tuisyen|nursery|toys|mothercare|kiddy|anakku|pampers|huggies|enfagrow|similac|dutch lady|childcare|diaper'],
+    ['车辆', 'service centre|servis|workshop|bengkel|tyre|tayar|battery|myeg|jpj|road tax|roadtax|insurans|insurance|takaful|puspakom|car wash|cuci kereta|toyota|mazda|perodua|proton|honda|engine oil'],
+    ['房屋', 'majlis|mbks|dbku|cukai|assessment|quit rent|management fee|maintenance|sinking fund|renovation|plumber|electrician|courts|senheng|harvey norman|furniture'],
+    ['娱乐', 'cinema|gsc|tgv|mbo|karaoke|ktv|bowling|arcade|steam|playstation|nintendo|concert|ticket|movie'],
+    ['保险', 'aia|prudential|great eastern|allianz|etiqa|manulife|zurich|tokio marine|premium|premi'],
+    ['人情', 'angpow|ang pao|wedding|gift|hadiah|donation|derma|temple|church|masjid|sedekah']
+  ];
+  var MERCHANT_RULES = MERCHANT_WORDS.map(function (x) {
+    return { cat: x[0], re: new RegExp('(?:^|[^a-z0-9])(' + x[1].split('|').map(function (w) { return w.replace(/[.*+?^${}()[\]\\]/g, function (c) { return c === '.' ? '\\.' : '\\' + c; }).replace(/ /g, '\\s*'); }).join('|') + ')(?![a-z0-9])', 'i') };
+  });
+  var MONEY_LINE = /(?:rm|myr|\$)?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2})\s*$/i;
+  var TOTAL_RE = /(grand\s*total|total\s*(amount|due|payable|sales|incl|inclusive|\(?rm\)?)?|jumlah\s*(besar|bayaran|keseluruhan)?|amount\s*(due|payable)|net\s*total|nett|amt\s*due|to\s*pay)/i;
+  var NOT_TOTAL_RE = /(sub\s*-?\s*total|subtotal|change|baki|balance|tender|cash|card|visa|master|debit|credit|saving|discount|diskaun|rounding|sst|gst|tax|cukai|point|mata|earned)/i;
+  var DATE_RE = /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b|\b(\d{4})-(\d{2})-(\d{2})\b|\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+(\d{2,4})\b/i;
+  function parseReceipt(text, opts) {
+    opts = opts || {};
+    var lines = String(text || '').split(/\r?\n/).map(function (l) { return l.replace(/\s+/g, ' ').trim(); }).filter(Boolean);
+    var amount = NaN, amountLine = -1, candidates = [];
+    lines.forEach(function (l, i) {
+      var m = l.match(MONEY_LINE); if (!m) return;
+      var v = parseFloat(m[1].replace(/,/g, '')); if (!(v > 0) || v > 1e6) return;
+      candidates.push({ v: v, i: i, total: TOTAL_RE.test(l) && !NOT_TOTAL_RE.test(l), bad: NOT_TOTAL_RE.test(l) });
+    });
+    var totals = candidates.filter(function (c) { return c.total; });
+    if (totals.length) { var t = totals[totals.length - 1]; amount = t.v; amountLine = t.i; }
+    else {
+      var good = candidates.filter(function (c) { return !c.bad; });
+      if (good.length) { var best = good.reduce(function (a, b) { return b.v >= a.v ? b : a; }); amount = best.v; amountLine = best.i; }
+    }
+    var date = null;
+    for (var i = 0; i < lines.length && !date; i++) {
+      var d = lines[i].match(DATE_RE); if (!d) continue;
+      if (d[1]) date = fmtDate(fullYear(d[3]), +d[2], +d[1]);
+      else if (d[4]) date = fmtDate(+d[4], +d[5], +d[6]);
+      else if (d[7]) { var mo = MONTHS[d[8].toLowerCase()]; if (mo) date = fmtDate(fullYear(d[9]), mo, +d[7]); }
+      if (date && opts.today && date > opts.today) date = null;
+    }
+    var merchant = '';
+    for (var j = 0; j < Math.min(lines.length, 6); j++) {
+      var l2 = lines[j];
+      if (/^\d|^(tel|fax|gst|sst|no\.|invoice|receipt|resit|tax|www|http|\(|\d{3,})/i.test(l2) || l2.length < 3 || /\d{5,}/.test(l2)) continue;
+      if (/[A-Za-z一-龥]{3,}/.test(l2)) { merchant = l2.replace(/\b(sdn\.? ?bhd\.?|berhad|enterprise|trading|s\/b)\b/ig, '').replace(/[^\w\s&'一-龥-]/g, ' ').replace(/\s+/g, ' ').trim(); break; }
+    }
+    var all = lines.join(' '), plain = all.replace(/[.'\-]/g, '');
+    var category = '', hit = null;
+    for (var k = 0; k < MERCHANT_RULES.length && !category; k++) {
+      var mm = all.match(MERCHANT_RULES[k].re) || plain.match(MERCHANT_RULES[k].re);
+      if (mm) { category = MERCHANT_RULES[k].cat; hit = mm[1] || mm[0]; }
+    }
+    var type = /(salary|gaji|payment received|credit advice|dividend|dividen|refund|bayaran balik|interest credited)/i.test(all) ? 'income' : 'expense';
+    return { amount: isFinite(amount) ? round2(amount) : NaN, amountLine: amountLine >= 0 ? lines[amountLine] : '', date: date, merchant: merchant, category: category, matched: hit, type: type, lines: lines.length };
+  }
+
   var api = {
     DEFAULT_RATE: DEFAULT_RATE, TX_TYPES: TX_TYPES,
     todayKuching: todayKuching, nowMonth: nowMonth, addMonths: addMonths, monthRange: monthRange,
@@ -1001,7 +1061,8 @@
     healthCheck: healthCheck, SETUP_TYPES: SETUP_TYPES, SETUP_CATEGORIES: SETUP_CATEGORIES, buildSetup: buildSetup, LIQUID: LIQUID,
     RECURRING_TEMPLATES: RECURRING_TEMPLATES, cardCycle: cardCycle, netWorthForecast: netWorthForecast, categoryForNote: categoryForNote,
     memberCategoryMatrix: memberCategoryMatrix, cashflowForecast: cashflowForecast, fiCalc: fiCalc, prepaySim: prepaySim, coverCheck: coverCheck,
-    compareShares: compareShares, parseSpeech: parseSpeech, MY_HOUSEHOLD_SHARES: MY_HOUSEHOLD_SHARES
+    compareShares: compareShares, parseSpeech: parseSpeech, MY_HOUSEHOLD_SHARES: MY_HOUSEHOLD_SHARES,
+    parseReceipt: parseReceipt, MERCHANT_RULES: MERCHANT_RULES
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Logic = api;

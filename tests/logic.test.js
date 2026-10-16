@@ -560,4 +560,28 @@ t('household share comparison and speech parsing', () => {
   assert.ok(L.RECURRING_TEMPLATES.length >= 15);
 });
 
+// 17. Receipt OCR text parsing
+t('receipt: total line wins over subtotal and change; date and merchant found; category from merchant', () => {
+  const r = L.parseReceipt([
+    'GIANT HYPERMARKET SDN BHD', 'Lot 123 Jalan Tun Jugah, Kuching', 'TEL: 082-123456', 'GST ID: 000123456789',
+    'Tax Invoice No: 00012345', 'Date: 15/10/2026 18:32', 'Fresh Milk 1L        7.50', 'Eggs Grade A 30s    14.90', 'Bread            3.20',
+    'Sub Total        25.60', 'Rounding         0.00', 'TOTAL           25.60', 'CASH             50.00', 'CHANGE           24.40', 'Thank you'
+  ].join('\n'), { today: '2026-10-16' });
+  assert.strictEqual(r.amount, 25.6); assert.strictEqual(r.date, '2026-10-15'); assert.strictEqual(r.merchant, 'GIANT HYPERMARKET'); assert.strictEqual(r.category, '饮食'); assert.strictEqual(r.type, 'expense');
+});
+t('receipt: petrol and utility categories; largest amount when no total line; future dates ignored', () => {
+  const p = L.parseReceipt('PETRONAS STATION\nPUMP 3 RON95\n12/10/2026\nAMOUNT RM 80.00\nAPPROVED');
+  assert.strictEqual(p.category, '交通与油费'); assert.strictEqual(p.amount, 80);
+  const u = L.parseReceipt('Tenaga Nasional Berhad\nBil Elektrik\n01 Oct 2026\nJumlah Bayaran 156.30');
+  assert.strictEqual(u.category, '水电网'); assert.strictEqual(u.amount, 156.3); assert.strictEqual(u.date, '2026-10-01');
+  const n = L.parseReceipt('Kedai Runcit Ah Seng\n2 x Item 3.00\nItem B 12.50\n', { today: '2026-10-16' });
+  assert.strictEqual(n.amount, 12.5); assert.strictEqual(n.category, '');
+  assert.strictEqual(L.parseReceipt('Receipt 31/12/2030 TOTAL 5.00', { today: '2026-10-16' }).date, null);
+});
+t('receipt: OCR noise, RM prefixes, thousands separators, income keywords', () => {
+  const r = L.parseReceipt('MR D.I.Y. (KUCHING) SDN BHD\nReceipt #998\nItem 1  RM 1,250.00\nTOTAL (RM)  1,262.50\nVISA  1,262.50');
+  assert.strictEqual(r.amount, 1262.5); assert.strictEqual(r.category, '日用');
+  assert.strictEqual(L.parseReceipt('Agrijoy Sdn Bhd\nPAYMENT RECEIVED\nAmount 4,000.00').type, 'income');
+});
+
 console.log('\n' + passed + ' tests passed');

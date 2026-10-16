@@ -338,6 +338,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
           <div class="racts">
             <label class="btn small">拍照<input id="fReceiptCam" type="file" accept="image/*" capture="environment" hidden></label>
             <label class="btn small">选择图片<input id="fReceiptPick" type="file" accept="image/*" hidden></label>
+            <button class="btn small" id="fOcrBtn" type="button" hidden>识别收据</button>
             <button class="btn small" id="fReceiptView" type="button" hidden>查看</button>
             <button class="btn small danger" id="fReceiptClear" type="button" hidden>移除</button>
             <span class="muted" id="fReceiptInfo"></span>
@@ -1663,6 +1664,7 @@ function setReceipt(dataUrl, fileId) {
   S.receipt = { dataUrl: dataUrl || null, fileId: fileId || null, removed: false };
   var has = !!(dataUrl || fileId);
   $('fReceiptView').hidden = !fileId;
+  $('fOcrBtn').hidden = !has || !ocrSupported();
   $('fReceiptClear').hidden = !has;
   $('fReceiptInfo').textContent = dataUrl ? '已选择，保存时上传' : fileId ? '已有收据' : '';
   $('fReceiptThumb').hidden = !dataUrl;
@@ -1704,8 +1706,62 @@ function pickReceipt(e) {
   compressImage(f).then(function (dataUrl) {
     if (dataUrl.length > 5.3e6) return toast('图片太大，请换一张');
     setReceipt(dataUrl, null);
+    $('fOcrBtn').hidden = false;
+    if (!S.editTxId) ocrReceipt(dataUrl);
   }).catch(function (err) { toast(err.message || '无法读取图片'); setReceipt(null, S.receipt.fileId); });
 }
+// ---------- receipt OCR: Tesseract (WASM, runs on the phone, files served from /vendor/ocr) + rules in logic.js ----------
+var ocrWorkerP = null;
+function ocrSupported() { return typeof WebAssembly === 'object' && typeof Worker === 'function'; }
+function wasmSimd() {
+  try { return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])); } catch (e) { return false; }
+}
+function ensureOcr(onProgress) {
+  if (ocrWorkerP) return ocrWorkerP;
+  ocrWorkerP = new Promise(function (resolve, reject) {
+    var sc = document.createElement('script'); sc.src = 'vendor/ocr/tesseract.min.js';
+    sc.onload = function () {
+      window.Tesseract.createWorker('eng', 1, {
+        workerPath: '/vendor/ocr/worker.min.js', langPath: '/vendor/ocr', workerBlobURL: false,
+        corePath: '/vendor/ocr/' + (wasmSimd() ? 'tesseract-core-simd-lstm.wasm.js' : 'tesseract-core-lstm.wasm.js'),
+        logger: function (m) { if (onProgress) onProgress(m); }
+      }).then(resolve, reject);
+    };
+    sc.onerror = function () { reject(new Error('无法加载识别组件')); };
+    document.head.appendChild(sc);
+  });
+  ocrWorkerP.catch(function () { ocrWorkerP = null; });
+  return ocrWorkerP;
+}
+var ocrSeq = 0;
+function ocrReceipt(dataUrl) {
+  if (!ocrSupported()) return;
+  var seq = ++ocrSeq, info = $('fReceiptInfo');
+  info.textContent = '正在识别收据文字（第一次要下载识别组件，约 10 MB）…';
+  $('fOcrBtn').disabled = true;
+  ensureOcr(function (m) { if (seq === ocrSeq && m && m.status === 'recognizing text') info.textContent = '识别中 ' + Math.round((m.progress || 0) * 100) + '%'; })
+    .then(function (w) { return w.recognize(dataUrl); })
+    .then(function (res) {
+      if (seq !== ocrSeq) return;
+      var text = res && res.data ? res.data.text : '';
+      applyReceipt(L.parseReceipt(text, { today: L.todayKuching() }), text);
+    })
+    .catch(function (e) { if (seq === ocrSeq) info.textContent = '识别失败：' + (e && e.message || '') + '，请手动填写'; })
+    .then(function () { $('fOcrBtn').disabled = false; });
+}
+function applyReceipt(r, text) {
+  var filled = [];
+  if (isFinite(r.amount) && !$('fAmt').value) { $('fAmt').value = r.amount; filled.push('RM ' + num(r.amount)); }
+  if (r.date && ($('fDate').value === L.todayKuching() || !$('fDate').value)) { $('fDate').value = r.date; filled.push(r.date); }
+  if (r.merchant && !$('fNote').value) { $('fNote').value = r.merchant; filled.push(r.merchant); }
+  var type = S.entryType === 'income' ? 'income' : 'expense';
+  var cat = L.categoryForNote(txArr(), r.merchant, type) || r.category;
+  if (cat && !S.catTouched && catList(type).some(function (c) { return c.name === cat; })) { $('fCat').value = cat; renderChips(); filled.push('分类「' + cat + '」'); }
+  if (r.type === 'income' && S.entryType === 'expense') filled.push('看起来像收入凭证，如是请切换到“收入”');
+  $('fReceiptInfo').textContent = filled.length ? '识别到：' + filled.join(' · ') + '（可修改）' : '没有识别出金额，请手动填写（' + (r.lines || 0) + ' 行文字）';
+  if (!filled.length && text) console.log('OCR text:', text);
+}
+$('fOcrBtn').addEventListener('click', function () { if (S.receipt.dataUrl) ocrReceipt(S.receipt.dataUrl); else if (S.receipt.fileId) window.Api.receiptGet(S.receipt.fileId).then(ocrReceipt); });
 function viewReceipt(fileId, meta) {
   if (!fileId) return;
   $('rcMeta').textContent = meta || '';

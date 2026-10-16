@@ -114,6 +114,9 @@ const api = (fn, args, key) => req('POST', '/api/' + fn + (key ? '?k=' + key : '
       const r = await req('GET', p); assert.strictEqual(r.status, 200, p);
     }
     assert.strictEqual((await req('GET', '/vendor/../server.js')).status, 404);
+    assert.strictEqual((await req('GET', '/vendor/ocr/eng.traineddata.gz')).status, 200);
+    assert.strictEqual((await req('GET', '/vendor/ocr/tesseract-core-simd-lstm.wasm.js')).status, 200);
+    assert.strictEqual((await req('GET', '/vendor/ocr/../../server.js')).status, 404);
     assert.strictEqual((await req('GET', '/icons/x.txt')).status, 404);
   });
 
