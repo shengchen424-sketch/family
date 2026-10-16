@@ -975,7 +975,13 @@ function renderOverview() {
 
 // ---------- first-run wizard ----------
 var W = null;
-function wizReset() {
+// Answers are kept in localStorage while the wizard is in progress, so closing the phone halfway loses nothing.
+function wizDraftLoad() { try { var d = JSON.parse(localStorage.getItem('familyWizard') || 'null'); return d && d.items ? d : null; } catch (e) { return null; } }
+function wizDraftSave() { try { if (W) localStorage.setItem('familyWizard', JSON.stringify(W)); } catch (e) {} }
+function wizDraftClear() { try { localStorage.removeItem('familyWizard'); } catch (e) {} }
+function wizReset(keepDraft) {
+  var draft = keepDraft ? wizDraftLoad() : null;
+  if (draft) { W = draft; return; }
   W = { step: 0, members: [], items: {}, incomes: [{ name: '', amount: '', day: 1, accountIdx: 0, auto: true }], budget: '', hasSgd: false };
   if (S.uid && S.uid !== 'shared') W.members.push(S.uid);
   arr(S.members).forEach(function (m) { if (W.members.indexOf(m.name) < 0) W.members.push(m.name); });
@@ -990,10 +996,12 @@ function wizSteps() {
   return steps;
 }
 function wizOpen() {
-  if (!W) wizReset();
-  W.step = 0;
+  if (!W) wizReset(true);
+  var steps = wizSteps();
+  if (!(W.step >= 0 && W.step < steps.length)) W.step = 0;
   wizRender();
   $('wizSheet').hidden = false;
+  if (W.step > 0) toast('已恢复上次填到一半的内容');
 }
 function wizCollect() {
   var st = wizSteps()[W.step];
@@ -1081,7 +1089,7 @@ function wizRow(t, r) {
     '<button class="btn small danger full" type="button" data-rmrow style="justify-self:end">移除这行</button></div>';
 }
 function wizNext() {
-  wizCollect();
+  wizCollect(); wizDraftSave();
   var steps = wizSteps(), st = steps[W.step];
   if (st.id === 'members' && !W.members.length) return toast('至少加一位成员');
   if (st.id === 'summary') return wizSave();
@@ -1102,20 +1110,20 @@ async function wizSave() {
     jobs.push(S.db.collection('settings').doc('onboarding').set(b.settings.onboarding));
     for (var i = 0; i < jobs.length; i += 8) await Promise.all(jobs.slice(i, i + 8));
     audit('新手设置', S.month, Object.keys(b.accounts).length + ' 个账户');
-    closeSheets(); W = null;
+    closeSheets(); W = null; wizDraftClear();
     toast('设置完成，欢迎使用');
     showTab('overview');
   } catch (e) { toast(errText(e)); }
   finally { $('wzNext').disabled = false; $('wzNext').textContent = '完成并保存'; }
 }
 $('wzNext').addEventListener('click', wizNext);
-$('wzBack').addEventListener('click', function () { wizCollect(); W.step = Math.max(0, W.step - 1); wizRender(); });
+$('wzBack').addEventListener('click', function () { wizCollect(); W.step = Math.max(0, W.step - 1); wizDraftSave(); wizRender(); });
 $('wzClose').addEventListener('click', function () {
-  wizCollect(); closeSheets();
+  wizCollect(); wizDraftSave(); closeSheets();
   if (!Object.keys(S.accounts).length) S.db.collection('settings').doc('onboarding').set({ done: false, dismissedAt: L.todayKuching() }).catch(function () {});
 });
-$('wizOpenBtn').addEventListener('click', function () { wizReset(); wizOpen(); });
-$('welcomeWiz').addEventListener('click', function () { wizReset(); wizOpen(); });
+$('wizOpenBtn').addEventListener('click', function () { wizReset(true); wizOpen(); });
+$('welcomeWiz').addEventListener('click', function () { wizReset(true); wizOpen(); });
 $('wzBody').addEventListener('click', function (e) {
   if (e.target.id === 'wzMemberAdd') {
     var v = $('wzMemberInput').value.trim(); if (!v) return;
@@ -2548,7 +2556,8 @@ async function init() {
   // first run: no accounts and the wizard was never finished or dismissed → open it once
   setTimeout(function () {
     var ob = S.settings.onboarding;
-    if (!Object.keys(S.accounts).length && !(ob && (ob.done || ob.dismissedAt)) && !S._wizAuto) { S._wizAuto = true; wizReset(); wizOpen(); }
+    if (!Object.keys(S.accounts).length && !(ob && (ob.done || ob.dismissedAt)) && !S._wizAuto) { S._wizAuto = true; wizReset(true); wizOpen(); }
+    else if (!Object.keys(S.accounts).length && wizDraftLoad() && !S._wizAuto) { S._wizAuto = true; wizReset(true); wizOpen(); }
   }, 1500);
 }
 init();
