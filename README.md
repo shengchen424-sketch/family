@@ -92,3 +92,11 @@ bash scripts/keys.sh remove-temp   # 删除 systemd 单元里的临时密钥 Che
 - **轻量模式**：设置里切换，中键变"更新余额"，隐藏日常记账细节。
 - **底座**：`tests/accounting.test.js` 14 项账务正确性测试；私人账户（服务端过滤）；匿名使用事件 `track` 与运营者 `usageStats`；owner 可删除本家庭全部数据。
 - 上架清单见 `docs/play-store-checklist.md`。
+
+## 发布流程（2026-10-16 起）
+
+- **Staging**：`/root/family-staging`，服务 `family-assets-staging`，端口 8446，`https://chen-family424.duckdns.org:8446/`，密钥在它自己的 `data/keys.txt`，只放虚构数据。`bash scripts/update.sh staging` 部署。
+- **Production**：`bash scripts/update.sh`。脚本会先跑三套测试，staging 服务挂掉时拒绝部署生产。
+- **规则**：自动开发可以自动提交、测试、部署到 staging。涉及 `server.js`、数据校验、权限、删除、存储结构的改动，生产部署前要人工批准；其余（页面、逻辑、知识库）通过测试后可自动上生产。所有测试只用虚构家庭数据，永远不清空真实家庭资料。健康评分与分配规则带版本号（`RULES_VERSION`），任务记录生成时所用的版本。
+- **删除与恢复**：owner 删除本家庭数据需输入 DELETE 和自己的密钥；数据归档在 `data/deleted/` 30 天，运营者可 `restoreDeleted`；30 天后自动清除。
+- **私人账户**：`private = 成员编号` 只有本人可见（owner 也看不到，只看到数量）；`auditable = true` 时 owner 可查看。服务端过滤，不只是页面隐藏。

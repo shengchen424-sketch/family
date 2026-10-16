@@ -618,8 +618,35 @@ t('allocatable cash = recurring income − fixed − typical variable spending',
   const a = L.allocatable({ tx: dtx, recurring: drec, month: M });
   assert.strictEqual(a.income, 8000); assert.strictEqual(a.fixed, 2500);
   assert.strictEqual(a.variable, 1500, 'avg expense 4000 minus fixed 2500');
-  assert.strictEqual(a.amount, 4000);
+  assert.strictEqual(a.amount, 4000); assert.strictEqual(a.state, 'ok');
   assert.strictEqual(L.allocatable({ tx: dtx, recurring: [], month: M }).income, 8000, 'falls back to average income');
+});
+t('allocatable states: unknown vs estimate vs negative vs interrupted; tax reserve and cash buffer', () => {
+  const unk = L.allocatable({ tx: [], recurring: [], month: M });
+  assert.strictEqual(unk.state, 'unknown'); assert.strictEqual(unk.amount, 0);
+  const est = L.allocatable({ tx: [], recurring: [], month: M, prefs: { incomeEstimate: 9000, expenseEstimate: 4000, taxReservePct: 10 } });
+  assert.strictEqual(est.state, 'ok'); assert.strictEqual(est.basis, 'estimate'); assert.strictEqual(est.taxReserve, 900); assert.strictEqual(est.amount, 4100);
+  const onlyIncome = L.allocatable({ tx: [], recurring: [{ type: 'income', amount: 5000, active: true }], month: M });
+  assert.strictEqual(onlyIncome.state, 'unknown-expense');
+  const neg = L.allocatable({ tx: dtx, recurring: [{ type: 'income', amount: 3000, active: true }, { type: 'expense', amount: 1000, active: true }], month: M });
+  assert.strictEqual(neg.state, 'negative'); assert.ok(neg.gap > 0);
+  const stopped = []; ['2026-05', '2026-06', '2026-07'].forEach(x => stopped.push({ type: 'income', month: x, amount: 5000 })); ['2026-08', '2026-09', M].forEach(x => stopped.push({ type: 'expense', month: x, amount: 2000 }));
+  const it = L.allocatable({ tx: stopped, recurring: [], month: M });
+  assert.strictEqual(it.state, 'interrupted');
+  const h = L.healthDiagnosis({ accounts: dacc, balances: dbal, rates: {}, tx: dtx, recurring: drec, month: M, prefs: {} });
+  assert.deepStrictEqual(L.allocationPlan(h, 0, [], M, it).tasks.map(t => t.kind), ['protect']);
+  assert.strictEqual(L.allocationPlan(h, 0, [], M, unk).state, 'unknown');
+  const buf = L.allocatable({ tx: dtx, recurring: drec, month: M, prefs: { cashBuffer: 5000 }, liquid: 3000 });
+  assert.strictEqual(buf.belowBuffer, true);
+  const plan = L.allocationPlan(h, buf.amount, [], M, buf);
+  assert.strictEqual(plan.tasks[0].key, 'buffer'); assert.strictEqual(plan.tasks[0].amount, 2000);
+  assert.strictEqual(plan.tasks.reduce((s, t) => s + t.amount, 0), buf.amount);
+});
+t('health index needs at least 3 measurable dimensions and flags preliminary results', () => {
+  const h = L.healthDiagnosis({ accounts: {}, balances: {}, rates: {}, tx: [], recurring: [], month: M, prefs: {} });
+  assert.strictEqual(h.index, null); assert.strictEqual(h.preliminary, true);
+  const h2 = L.healthDiagnosis({ accounts: dacc, balances: dbal, rates: {}, tx: dtx, recurring: drec, month: M, prefs: { lifeCover: 100000 } });
+  assert.ok(h2.confidence >= 5); assert.strictEqual(h2.preliminary, false);
 });
 t('allocation plan: emergency first, then debt, then long-term, then goals; amounts sum to input', () => {
   const h = L.healthDiagnosis({ accounts: dacc, balances: dbal, rates: {}, tx: dtx, recurring: drec, month: M, prefs: {} });

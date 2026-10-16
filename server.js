@@ -25,6 +25,7 @@ const DEFAULT_FAMILY = 'default';
 function famDir(fam) { return fam === DEFAULT_FAMILY ? DATA_DIR : path.join(DATA_DIR, 'families', fam); }
 function receiptDir(fam) { const d = path.join(famDir(fam), 'receipts'); fs.mkdirSync(d, { recursive: true }); return d; }
 function backupDir(fam) { return path.join(famDir(fam), 'backups'); }
+const DELETED_DIR = path.join(DATA_DIR, 'deleted');
 // Plans: a family's settings doc "plan" {tier:'free'|'pro', until}. No doc = pro (self-hosted families are never limited).
 // Billing (Google Play) will call setPlan when it goes live; FREE_LIMITS is what the free tier gets.
 const FREE_LIMITS = { accounts: 8, receipts: false };
@@ -88,7 +89,7 @@ Object.keys(KEYS).forEach(k => { const e = KEYS[k]; if (!OWNERS[e.family]) OWNER
 if (process.env.FAMILY_OWNER) OWNERS[DEFAULT_FAMILY] = process.env.FAMILY_OWNER;
 const OWNER = OWNERS[DEFAULT_FAMILY];
 function families() { return Object.keys(OWNERS); }
-function ctxFor(key) { const e = KEYS[key]; return { me: e.name, family: e.family, owner: e.name === OWNERS[e.family], operator: e.family === DEFAULT_FAMILY && e.name === OWNER }; }
+function ctxFor(key) { const e = KEYS[key]; return { me: e.name, family: e.family, owner: e.name === OWNERS[e.family], operator: e.family === DEFAULT_FAMILY && e.name === OWNER, key: key }; }
 const Logic = require('./src/logic.js');
 
 // Brute-force protection: after MAX_FAILS wrong keys from one address within WINDOW, that address waits BLOCK_MS.
@@ -194,10 +195,15 @@ function pruneAudit(m) {
   ids.slice(0, ids.length - AUDIT_MAX).forEach(id => { delete m[id]; });
 }
 // Accounts marked private (account.private = member id) are visible only to that member and the family owner.
+// Visibility: account.private = member id → only that member sees it (and its balances, transactions, goals);
+// account.auditable = true additionally lets the family owner see it. Nobody else, including the owner otherwise.
 function hiddenAccounts(ctx) {
-  if (ctx.owner) return new Set();
   const accs = load(ctx.family, 'accounts');
-  return new Set(Object.keys(accs).filter(id => accs[id].private && accs[id].private !== ctx.me));
+  return new Set(Object.keys(accs).filter(id => accs[id].private && accs[id].private !== ctx.me && !(ctx.owner && accs[id].auditable)));
+}
+function privateCount(ctx) {
+  const accs = load(ctx.family, 'accounts');
+  return Object.keys(accs).filter(id => accs[id].private && accs[id].private !== ctx.me).length;
 }
 function isHiddenDoc(name, id, d, hidden) {
   if (!hidden.size || !d) return false;
@@ -215,7 +221,7 @@ function removeReceipt(fam, fileId) {
 
 // Every API function receives ctx = { me, family, owner, operator } first; the HTTP layer builds it from the key.
 const API = {
-  getMe(ctx) { return { name: ctx.me, owner: ctx.owner, family: ctx.family, plan: planOf(ctx.family), operator: ctx.operator }; },
+  getMe(ctx) { return { name: ctx.me, owner: ctx.owner, family: ctx.family, plan: planOf(ctx.family), operator: ctx.operator, hiddenPrivate: privateCount(ctx) }; },
 
   getSnapshot(ctx, names) {
     const out = {};
@@ -254,14 +260,42 @@ const API = {
   },
 
   // Owner wipes everything in the family (collections, receipts, backups). The keys stay; the family starts empty.
-  deleteFamilyData(ctx, confirmText) {
+  // Wipe = owner + DELETE + the owner's own key typed again. Everything is first archived under data/deleted/<family>-<time>/
+  // and kept for 30 days (operator can restore with restoreDeleted); then the family starts empty.
+  deleteFamilyData(ctx, confirmText, keyAgain) {
     if (!ctx.owner) throw new Error('只有 ' + OWNERS[ctx.family] + ' 可以删除全部数据');
     if (confirmText !== 'DELETE') throw new Error('请输入 DELETE 确认');
+    if (!keyAgain || keyAgain !== ctx.key) throw new Error('请重新输入你的访问密钥以确认身份');
     return serial(() => {
-      COLLECTIONS.forEach(n => { cache[ctx.family + '/' + n] = {}; try { fs.unlinkSync(path.join(famDir(ctx.family), n + '.json')); } catch (e) { /* none */ } });
-      fs.rmSync(receiptDir(ctx.family), { recursive: true, force: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const arch = path.join(DELETED_DIR, ctx.family + '-' + stamp);
+      fs.mkdirSync(arch, { recursive: true });
+      COLLECTIONS.forEach(n => { const f = path.join(famDir(ctx.family), n + '.json'); if (fs.existsSync(f)) fs.renameSync(f, path.join(arch, n + '.json')); cache[ctx.family + '/' + n] = {}; });
+      const rd = receiptDir(ctx.family); if (fs.existsSync(rd)) fs.renameSync(rd, path.join(arch, 'receipts'));
       fs.rmSync(backupDir(ctx.family), { recursive: true, force: true });
-      return { deleted: true };
+      fs.writeFileSync(path.join(arch, 'meta.json'), JSON.stringify({ family: ctx.family, by: ctx.me, at: new Date().toISOString(), recoverUntil: Logic.addMonths(Logic.nowMonth(), 1) }));
+      console.log('[' + ctx.family + '] 数据已由 ' + ctx.me + ' 删除，归档 30 天：' + arch);
+      return { deleted: true, archived: path.basename(arch), recoverDays: 30 };
+    });
+  },
+  listDeleted(ctx) {
+    if (!ctx.operator) throw new Error('只有运营者可以查看');
+    try { return fs.readdirSync(DELETED_DIR).filter(d => fs.existsSync(path.join(DELETED_DIR, d, 'meta.json'))).map(d => Object.assign({ folder: d }, JSON.parse(fs.readFileSync(path.join(DELETED_DIR, d, 'meta.json'), 'utf8')))); } catch (e) { return []; }
+  },
+  restoreDeleted(ctx, folder) {
+    if (!ctx.operator) throw new Error('只有运营者可以恢复');
+    const arch = path.join(DELETED_DIR, String(folder || '').replace(/[^\w.-]/g, ''));
+    if (!fs.existsSync(path.join(arch, 'meta.json'))) throw new Error('没有这个归档');
+    const meta = JSON.parse(fs.readFileSync(path.join(arch, 'meta.json'), 'utf8'));
+    return serial(() => {
+      let n = 0;
+      COLLECTIONS.forEach(c => {
+        const f = path.join(arch, c + '.json'); if (!fs.existsSync(f)) return;
+        const m = load(meta.family, c), src = JSON.parse(fs.readFileSync(f, 'utf8'));
+        Object.keys(src).forEach(id => { m[id] = src[id]; n++; }); save(meta.family, c);
+      });
+      const rd = path.join(arch, 'receipts'); if (fs.existsSync(rd)) { const dst = receiptDir(meta.family); fs.readdirSync(rd).forEach(f => fs.copyFileSync(path.join(rd, f), path.join(dst, f))); }
+      return { restored: n, family: meta.family };
     });
   },
 
@@ -276,7 +310,7 @@ const API = {
     if (isHiddenDoc(name, id, data, hidden) || (name === 'accounts' && hidden.has(id))) throw new Error('这是别人的私人账户');
     return serial(() => {
       const m = load(ctx.family, name);
-      if (name === 'accounts' && m[id] && m[id].private && m[id].private !== ctx.me && !ctx.owner) throw new Error('这是别人的私人账户');
+      if (name === 'accounts' && m[id] && m[id].private && m[id].private !== ctx.me) throw new Error('这是别人的私人账户');
       if (name === 'accounts' && !m[id] && planOf(ctx.family).tier === 'free' && Object.keys(m).length >= FREE_LIMITS.accounts) throw new Error('免费版最多 ' + FREE_LIMITS.accounts + ' 个账户，升级后不限');
       m[id] = data;
       if (name === 'audit') pruneAudit(m);
@@ -532,7 +566,12 @@ setTimeout(autoPostRecurring, 8000);
 setInterval(autoPostRecurring, 3600e3).unref();
 
 // ---------- daily on-disk backup of the JSON collections (last 30 days kept) ----------
-function dailyBackup() { families().forEach(dailyBackupFor); }
+function dailyBackup() {
+  families().forEach(dailyBackupFor);
+  try { // purge wiped-family archives after their 30-day recovery window
+    fs.readdirSync(DELETED_DIR).forEach(d => { const mf = path.join(DELETED_DIR, d, 'meta.json'); if (!fs.existsSync(mf)) return; const meta = JSON.parse(fs.readFileSync(mf, 'utf8')); if (Date.parse(meta.at) < Date.now() - 30 * 864e5) fs.rmSync(path.join(DELETED_DIR, d), { recursive: true, force: true }); });
+  } catch (e) { /* no archives */ }
+}
 function dailyBackupFor(fam) {
   try {
     const day = Logic.todayKuching(), bdir = backupDir(fam);

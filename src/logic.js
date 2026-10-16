@@ -1103,21 +1103,39 @@
     var gr = fc.rate != null && incomeM > 0 ? fc.rate / incomeM : null;
     dims.push({ key: 'growth', name: '财富增长', value: gr, text: fc.rate == null ? '需要至少两个月的净资产记录' : '净资产每月' + (fc.rate >= 0 ? '增加' : '减少') + ' ' + Math.abs(fc.rate).toFixed(0) + (gr != null ? '（相当于收入的 ' + (gr * 100).toFixed(0) + '%）' : ''), score: gr == null ? null : scoreBands(gr, [[0.3, 100], [0.2, 85], [0.1, 65], [0, 40], [-1e9, 10]]), hint: '长期靠定投和再平衡；单一资产（如房产）占比过高要注意' });
     var scored = dims.filter(function (x) { return x.score != null; });
-    var index = scored.length ? Math.round(scored.reduce(function (a, x) { return a + x.score; }, 0) / scored.length) : null;
-    return { index: index, dims: dims, income: round2(incomeM), expense: round2(expense), liquid: round2(tot.liquid), emergencyMonths: em, emergencyTarget: target, highCost: highCost, net: round2(tot.net), retire: round2(retire) };
+    var index = scored.length >= 3 ? Math.round(scored.reduce(function (a, x) { return a + x.score; }, 0) / scored.length) : null;
+    return { index: index, dims: dims, confidence: scored.length, preliminary: scored.length < 5, income: round2(incomeM), expense: round2(expense), liquid: round2(tot.liquid), emergencyMonths: em, emergencyTarget: target, highCost: highCost, net: round2(tot.net), retire: round2(retire) };
   }
   // Money the family can decide about this month: income − fixed commitments − typical variable spending.
+  // state: 'unknown' (no income data), 'unknown-expense' (no spending data), 'interrupted' (income stopped recently),
+  //        'negative' (committed spending exceeds income), 'ok'. Missing data is never treated as zero money.
   function allocatable(d) {
-    var tx = d.tx || [], m = d.month, rec = recurringMonthly(d.recurring);
-    var income = rec.income || avgIncome(tx, m, 3);
-    var variable = Math.max(0, avgMonthlyExpense(tx, m, 3) - rec.fixed + rec.debt * 0); // fixed items already in rec.fixed
-    var amount = Math.max(0, round2(income - rec.fixed - variable));
-    return { income: round2(income), fixed: rec.fixed, variable: round2(variable), amount: amount, basis: rec.income ? 'recurring' : 'average' };
+    var tx = d.tx || [], m = d.month, rec = recurringMonthly(d.recurring), p = d.prefs || {};
+    var incomeTx = avgIncome(tx, m, 3), est = Number(p.incomeEstimate) || 0;
+    var income = rec.income || incomeTx || est, basis = rec.income ? 'recurring' : incomeTx ? 'average' : est ? 'estimate' : 'none';
+    var expAvg = avgMonthlyExpense(tx, m, 3), expEst = Number(p.expenseEstimate) || 0;
+    var variable = expAvg > 0 ? Math.max(0, expAvg - rec.fixed) : expEst > 0 ? Math.max(0, expEst - rec.fixed) : 0;
+    var expenseKnown = expAvg > 0 || rec.fixed > 0 || expEst > 0;
+    var taxReserve = round2(income * (Number(p.taxReservePct) || 0) / 100);
+    // income interruption: the last two months had no income although the three before did
+    var recent = [m, addMonths(m, -1)].map(function (x) { return cashflow(tx, x).income; }), earlier = monthRange(addMonths(m, -2), 3).map(function (x) { return cashflow(tx, x).income; });
+    var interrupted = !rec.income && recent.every(function (v) { return v === 0; }) && earlier.some(function (v) { return v > 0; });
+    var raw = round2(income - rec.fixed - variable - taxReserve);
+    var state = interrupted ? 'interrupted' : basis === 'none' ? 'unknown' : !expenseKnown ? 'unknown-expense' : raw < 0 ? 'negative' : 'ok';
+    var buffer = Number(p.cashBuffer) || 0, liquid = Number(d.liquid) || 0;
+    return { income: round2(income), fixed: rec.fixed, variable: round2(variable), taxReserve: taxReserve, raw: raw, amount: state === 'ok' ? Math.max(0, raw) : 0,
+      basis: basis, state: state, gap: raw < 0 ? -raw : 0, belowBuffer: buffer > 0 && liquid < buffer, buffer: buffer, interrupted: interrupted };
   }
   // Allocation rules: ordered, each takes a share of what is left; amounts rounded to RM10; sum equals the input.
-  function allocationPlan(diag, amount, goals, m) {
+  function allocationPlan(diag, amount, goals, m, al) {
     var left = Math.floor((Number(amount) || 0) / 10) * 10, out = [];
-    if (left <= 0) return { version: RULES_VERSION, tasks: [], left: 0, note: '本月没有可分配的钱：先把固定支出和平均开销降下来，或补上收入记录。' };
+    var state = al && al.state ? al.state : 'ok';
+    if (state === 'unknown') return { version: RULES_VERSION, tasks: [], left: 0, state: state, note: '还不知道你每月有多少收入。添加定期收入，或先填一个大概的月收入估计。' };
+    if (state === 'unknown-expense') return { version: RULES_VERSION, tasks: [], left: 0, state: state, note: '还不知道每月要花多少。记几笔开销，或先填一个大概的月开销估计。' };
+    if (state === 'interrupted') return { version: RULES_VERSION, tasks: [{ key: 'protect-cash', title: '收入中断：暂停新增投资，保住现金', amount: 0, reason: '近两个月没有收入记录。先确认收入状况；现有现金优先留给必要开支和月供，不做新的长期投资。', kind: 'protect', id: m + '__protect-cash', month: m }], left: 0, state: state };
+    if (state === 'negative') return { version: RULES_VERSION, tasks: [{ key: 'fix-gap', title: '补上每月 ' + (al.gap || 0).toFixed(0) + ' 的资金缺口', amount: 0, reason: '固定支出加平均开销超过收入。先看固定支出里能停的订阅、能重组的贷款，再谈储蓄。', kind: 'protect', id: m + '__fix-gap', month: m }], left: 0, state: state };
+    if (al && al.belowBuffer) { var need = Math.min(left, Math.ceil((al.buffer - (diag.liquid || 0)) / 10) * 10); if (need > 0) { out.push({ key: 'buffer', title: '先把现金补到安全线 ' + al.buffer.toFixed(0), amount: need, reason: '你设定的最低现金缓冲还没达到。', kind: 'save' }); left -= need; } }
+    if (left <= 0 && !out.length) return { version: RULES_VERSION, tasks: [], left: 0, state: state, note: '本月没有可分配的钱：收入刚好覆盖固定支出和平均开销。' };
     function take(key, title, share, reason, kind) {
       if (left <= 0) return;
       var amt = Math.min(left, Math.max(10, Math.floor(left * share / 10) * 10));

@@ -642,8 +642,8 @@ body.lite .nav [data-tab="ledger"]{display:none}
 
     <div class="panel" id="dangerPanel" hidden>
       <h2>删除全部数据</h2>
-      <p class="muted">删除这个家庭的所有账户、流水、收据、备份。不可恢复。只有 owner 可以操作，输入 DELETE 确认。</p>
-      <div class="form"><label>确认文字<input id="delConfirm" type="text" autocomplete="off" placeholder="DELETE"></label></div>
+      <p class="muted">范围：这个家庭的所有账户、余额、流水、收据、目标、任务、设置和服务器备份；其他成员下次打开会看到空账本。删除后数据在服务器保留 30 天供运营者恢复，之后彻底清除（与隐私政策一致）。只有 owner 可以操作，需要输入 DELETE 并重新输入你的访问密钥。</p>
+      <div class="form"><label>确认文字<input id="delConfirm" type="text" autocomplete="off" placeholder="DELETE"></label><label>重新输入你的访问密钥<input id="delKey" type="password" autocomplete="off"></label></div>
       <div class="acts" style="justify-content:flex-start"><button class="btn danger" id="delFamilyBtn">删除本家庭全部数据</button></div>
     </div>
 
@@ -687,7 +687,7 @@ body.lite .nav [data-tab="ledger"]{display:none}
       <label>分类<input id="aCat" type="text" maxlength="30" list="catNames"><datalist id="catNames"><option value="现金与定存"><option value="投资"><option value="保险"><option value="房产"><option value="车辆"><option value="退休金"><option value="房贷"><option value="车贷"><option value="个人贷款"><option value="企业现金"><option value="企业透支"></datalist></label>
       <label>归属<select id="aGroup"><option value="family">家庭</option><option value="business">企业（不计入家庭）</option></select></label>
       <label>排序（小的在前）<input id="aSort" type="number" step="1" inputmode="numeric"></label>
-      <label>可见范围<select id="aPrivate"><option value="">全家可见</option><option value="me">仅我自己和 owner 可见（私人账户）</option></select></label>
+      <label>可见范围<select id="aPrivate"><option value="">全家共同账户（所有成员可见）</option><option value="me">私人账户：只有我能看到（owner 也看不到，只知道有几个私人账户）</option><option value="audit">私人账户，但允许 owner 查看</option></select></label>
       <label><span id="aAmtLabel">余额</span><input id="aAmt" type="number" step="0.01" inputmode="decimal"></label>
       <label>截至日期<input id="aAsOf" type="date"></label>
       <label class="full">备注<input id="aNote" type="text" maxlength="120"></label>
@@ -2037,21 +2037,39 @@ body.lite .nav [data-tab="ledger"]{display:none}
     var gr = fc.rate != null && incomeM > 0 ? fc.rate / incomeM : null;
     dims.push({ key: 'growth', name: '财富增长', value: gr, text: fc.rate == null ? '需要至少两个月的净资产记录' : '净资产每月' + (fc.rate >= 0 ? '增加' : '减少') + ' ' + Math.abs(fc.rate).toFixed(0) + (gr != null ? '（相当于收入的 ' + (gr * 100).toFixed(0) + '%）' : ''), score: gr == null ? null : scoreBands(gr, [[0.3, 100], [0.2, 85], [0.1, 65], [0, 40], [-1e9, 10]]), hint: '长期靠定投和再平衡；单一资产（如房产）占比过高要注意' });
     var scored = dims.filter(function (x) { return x.score != null; });
-    var index = scored.length ? Math.round(scored.reduce(function (a, x) { return a + x.score; }, 0) / scored.length) : null;
-    return { index: index, dims: dims, income: round2(incomeM), expense: round2(expense), liquid: round2(tot.liquid), emergencyMonths: em, emergencyTarget: target, highCost: highCost, net: round2(tot.net), retire: round2(retire) };
+    var index = scored.length >= 3 ? Math.round(scored.reduce(function (a, x) { return a + x.score; }, 0) / scored.length) : null;
+    return { index: index, dims: dims, confidence: scored.length, preliminary: scored.length < 5, income: round2(incomeM), expense: round2(expense), liquid: round2(tot.liquid), emergencyMonths: em, emergencyTarget: target, highCost: highCost, net: round2(tot.net), retire: round2(retire) };
   }
   // Money the family can decide about this month: income − fixed commitments − typical variable spending.
+  // state: 'unknown' (no income data), 'unknown-expense' (no spending data), 'interrupted' (income stopped recently),
+  //        'negative' (committed spending exceeds income), 'ok'. Missing data is never treated as zero money.
   function allocatable(d) {
-    var tx = d.tx || [], m = d.month, rec = recurringMonthly(d.recurring);
-    var income = rec.income || avgIncome(tx, m, 3);
-    var variable = Math.max(0, avgMonthlyExpense(tx, m, 3) - rec.fixed + rec.debt * 0); // fixed items already in rec.fixed
-    var amount = Math.max(0, round2(income - rec.fixed - variable));
-    return { income: round2(income), fixed: rec.fixed, variable: round2(variable), amount: amount, basis: rec.income ? 'recurring' : 'average' };
+    var tx = d.tx || [], m = d.month, rec = recurringMonthly(d.recurring), p = d.prefs || {};
+    var incomeTx = avgIncome(tx, m, 3), est = Number(p.incomeEstimate) || 0;
+    var income = rec.income || incomeTx || est, basis = rec.income ? 'recurring' : incomeTx ? 'average' : est ? 'estimate' : 'none';
+    var expAvg = avgMonthlyExpense(tx, m, 3), expEst = Number(p.expenseEstimate) || 0;
+    var variable = expAvg > 0 ? Math.max(0, expAvg - rec.fixed) : expEst > 0 ? Math.max(0, expEst - rec.fixed) : 0;
+    var expenseKnown = expAvg > 0 || rec.fixed > 0 || expEst > 0;
+    var taxReserve = round2(income * (Number(p.taxReservePct) || 0) / 100);
+    // income interruption: the last two months had no income although the three before did
+    var recent = [m, addMonths(m, -1)].map(function (x) { return cashflow(tx, x).income; }), earlier = monthRange(addMonths(m, -2), 3).map(function (x) { return cashflow(tx, x).income; });
+    var interrupted = !rec.income && recent.every(function (v) { return v === 0; }) && earlier.some(function (v) { return v > 0; });
+    var raw = round2(income - rec.fixed - variable - taxReserve);
+    var state = interrupted ? 'interrupted' : basis === 'none' ? 'unknown' : !expenseKnown ? 'unknown-expense' : raw < 0 ? 'negative' : 'ok';
+    var buffer = Number(p.cashBuffer) || 0, liquid = Number(d.liquid) || 0;
+    return { income: round2(income), fixed: rec.fixed, variable: round2(variable), taxReserve: taxReserve, raw: raw, amount: state === 'ok' ? Math.max(0, raw) : 0,
+      basis: basis, state: state, gap: raw < 0 ? -raw : 0, belowBuffer: buffer > 0 && liquid < buffer, buffer: buffer, interrupted: interrupted };
   }
   // Allocation rules: ordered, each takes a share of what is left; amounts rounded to RM10; sum equals the input.
-  function allocationPlan(diag, amount, goals, m) {
+  function allocationPlan(diag, amount, goals, m, al) {
     var left = Math.floor((Number(amount) || 0) / 10) * 10, out = [];
-    if (left <= 0) return { version: RULES_VERSION, tasks: [], left: 0, note: '本月没有可分配的钱：先把固定支出和平均开销降下来，或补上收入记录。' };
+    var state = al && al.state ? al.state : 'ok';
+    if (state === 'unknown') return { version: RULES_VERSION, tasks: [], left: 0, state: state, note: '还不知道你每月有多少收入。添加定期收入，或先填一个大概的月收入估计。' };
+    if (state === 'unknown-expense') return { version: RULES_VERSION, tasks: [], left: 0, state: state, note: '还不知道每月要花多少。记几笔开销，或先填一个大概的月开销估计。' };
+    if (state === 'interrupted') return { version: RULES_VERSION, tasks: [{ key: 'protect-cash', title: '收入中断：暂停新增投资，保住现金', amount: 0, reason: '近两个月没有收入记录。先确认收入状况；现有现金优先留给必要开支和月供，不做新的长期投资。', kind: 'protect', id: m + '__protect-cash', month: m }], left: 0, state: state };
+    if (state === 'negative') return { version: RULES_VERSION, tasks: [{ key: 'fix-gap', title: '补上每月 ' + (al.gap || 0).toFixed(0) + ' 的资金缺口', amount: 0, reason: '固定支出加平均开销超过收入。先看固定支出里能停的订阅、能重组的贷款，再谈储蓄。', kind: 'protect', id: m + '__fix-gap', month: m }], left: 0, state: state };
+    if (al && al.belowBuffer) { var need = Math.min(left, Math.ceil((al.buffer - (diag.liquid || 0)) / 10) * 10); if (need > 0) { out.push({ key: 'buffer', title: '先把现金补到安全线 ' + al.buffer.toFixed(0), amount: need, reason: '你设定的最低现金缓冲还没达到。', kind: 'save' }); left -= need; } }
+    if (left <= 0 && !out.length) return { version: RULES_VERSION, tasks: [], left: 0, state: state, note: '本月没有可分配的钱：收入刚好覆盖固定支出和平均开销。' };
     function take(key, title, share, reason, kind) {
       if (left <= 0) return;
       var amt = Math.min(left, Math.max(10, Math.floor(left * share / 10) * 10));
@@ -2328,7 +2346,7 @@ body.lite .nav [data-tab="ledger"]{display:none}
       withSuccessHandler: function (f) { ok = f; return r; },
       withFailureHandler: function (f) { bad = f; return r; }
     };
-    ['getMe', 'getSnapshot', 'setDoc', 'delDoc', 'uploadReceipt', 'getReceipt', 'getSeed', 'exportAll', 'importAll', 'listBackups', 'restoreBackup', 'setPlan', 'listFamilies', 'track', 'usageStats', 'deleteFamilyData'].forEach(function (fn) {
+    ['getMe', 'getSnapshot', 'setDoc', 'delDoc', 'uploadReceipt', 'getReceipt', 'getSeed', 'exportAll', 'importAll', 'listBackups', 'restoreBackup', 'setPlan', 'listFamilies', 'track', 'usageStats', 'deleteFamilyData', 'listDeleted', 'restoreDeleted'].forEach(function (fn) {
       r[fn] = function () {
         var args = Array.prototype.slice.call(arguments);
         var s = ok, b = bad;
@@ -3085,21 +3103,38 @@ function renderActionPlan() {
   var hasData = Object.keys(S.accounts).length > 0;
   $('planBox').hidden = !hasData; $('healthBox').hidden = !hasData;
   if (!hasData) return;
-  var diag = diagNow(), al = L.allocatable({ tx: txArr(), recurring: recArr(), month: S.month });
-  var plan = L.allocationPlan(diag, al.amount, goalsForPlan(), S.month);
-  ensureTasks(plan);
+  var diag = diagNow(), al = L.allocatable({ tx: txArr(), recurring: recArr(), month: S.month, prefs: prefs(), liquid: diag.liquid });
+  var plan = L.allocationPlan(diag, al.amount, goalsForPlan(), S.month, al);
+  if (al.state === 'ok') ensureTasks(plan);
   var tasks = monthTasks(), open = tasks.filter(function (t) { return t.status === 'open'; }), done = tasks.filter(function (t) { return t.status === 'done'; });
   var next = open[0];
   var h = '<div class="lbl">我的家庭财务计划 · ' + S.month + '</div>';
-  h += '<div class="lbl" style="margin-top:8px">本月预计可分配金额</div><div class="big">' + rm(al.amount) + '</div>';
-  h += '<div class="lbl">' + (al.basis === 'recurring' ? '定期收入' : '近 3 个月平均收入') + ' ' + num(al.income) + ' − 固定支出与月供 ' + num(al.fixed) + ' − 平均其他开销 ' + num(al.variable) + (al.amount === 0 ? ' · 没有余钱时先看固定支出' : '') + '</div>';
+  var basisTxt = { recurring: '定期收入', average: '近 3 个月平均收入', estimate: '你填的收入估计', none: '收入未知' }[al.basis];
+  if (al.state === 'unknown' || al.state === 'unknown-expense') {
+    h += '<div class="lbl" style="margin-top:8px">本月预计可分配金额</div><div class="big" style="color:var(--muted)">还不能计算</div>';
+    h += '<div class="lbl">' + esc(plan.note || '') + '</div>';
+    h += '<div class="task"><div class="lbl">先填一个大概数（随时可改），系统就能开始规划：</div><div class="fields" style="margin-top:6px">' +
+      '<label>每月收入（估，RM）<input id="alIncome" type="text" inputmode="decimal" value="' + esc(prefs().incomeEstimate || '') + '" placeholder="自雇就填近一年平均"></label>' +
+      '<label>每月必要开销 + 月供（估，RM）<input id="alExpense" type="text" inputmode="decimal" value="' + esc(prefs().expenseEstimate || '') + '"></label>' +
+      '<label>税款预留（%，自雇建议 10–15）<input id="alTax" type="text" inputmode="decimal" value="' + esc(prefs().taxReservePct || '') + '"></label>' +
+      '<label>最低现金缓冲（RM，可空）<input id="alBuffer" type="text" inputmode="decimal" value="' + esc(prefs().cashBuffer || '') + '"></label></div>' +
+      '<div class="acts" style="justify-content:flex-start;margin:0"><button class="btn primary small" id="alSave">保存并计算</button><button class="btn small" data-act="new-rec">或添加定期收入</button></div></div>';
+  } else if (al.state === 'interrupted' || al.state === 'negative') {
+    h += '<div class="lbl" style="margin-top:8px">' + (al.state === 'interrupted' ? '收入中断' : '每月资金缺口') + '</div><div class="big" style="color:var(--neg)">' + (al.state === 'interrupted' ? '暂停新投资' : '-' + rm(al.gap)) + '</div>';
+    h += '<div class="lbl">' + esc(basisTxt) + ' ' + num(al.income) + ' − 固定支出与月供 ' + num(al.fixed) + ' − 平均其他开销 ' + num(al.variable) + (al.taxReserve ? ' − 税款预留 ' + num(al.taxReserve) : '') + '</div>';
+  } else {
+    h += '<div class="lbl" style="margin-top:8px">本月预计可分配金额</div><div class="big">' + rm(al.amount) + '</div>';
+    h += '<div class="lbl">' + esc(basisTxt) + ' ' + num(al.income) + ' − 固定支出与月供 ' + num(al.fixed) + ' − 平均其他开销 ' + num(al.variable) + (al.taxReserve ? ' − 税款预留 ' + num(al.taxReserve) : '') + (al.belowBuffer ? ' · 现金低于你设的缓冲线' : '') + (al.basis === 'estimate' ? ' · <button class="btn small" id="alEdit" type="button">改估计</button>' : '') + '</div>';
+  }
   if (next) {
     h += '<div class="task"><div class="lbl">你的下一个重要行动</div><b>' + esc(next.title) + ' · ' + rm(next.amount) + '</b><p>' + esc(next.reason) + '</p>' +
       '<div class="acts" style="justify-content:flex-start;margin:0"><button class="btn primary small" data-task="done" data-id="' + esc(next.id) + '">已完成</button><button class="btn small" data-task="skip" data-id="' + esc(next.id) + '">这个月跳过</button></div></div>';
   } else if (tasks.length) {
     h += '<div class="task"><b>本月行动都处理完了 🎉</b><p>下个月 1 号会按新的数据重新生成。</p></div>';
-  } else {
-    h += '<div class="task"><b>还没有可分配的钱</b><p>' + esc(plan.note || '先补上收入与固定支出的定期项目，系统才能算出每月能安排多少。') + '</p><div class="acts" style="justify-content:flex-start;margin:0"><button class="btn small" data-act="new-rec">添加定期收入/支出</button></div></div>';
+  } else if (plan.tasks.length && al.state !== 'ok') {
+    h += '<div class="task"><div class="lbl">现在最重要的事</div><b>' + esc(plan.tasks[0].title) + '</b><p>' + esc(plan.tasks[0].reason) + '</p></div>';
+  } else if (al.state === 'ok') {
+    h += '<div class="task"><b>' + esc(plan.note || '本月没有可分配的钱') + '</b></div>';
   }
   var cur = L.pyramidStatus(diag).find(function (x) { return x.status === 'current'; });
   if (cur) h += '<div class="task"><div class="lbl">现在所在的层级</div><b>第 ' + cur.level + ' 层 · ' + esc(cur.name) + '</b><p>' + esc(cur.why) + '</p><div class="acts" style="justify-content:flex-start;margin:0"><button class="btn small" data-tab="learn">看这一层怎么做 ›</button></div></div>';
@@ -3117,7 +3152,7 @@ function renderActionPlan() {
   }
   $('planBox').innerHTML = h;
   var cls = diag.index == null ? '' : diag.index >= 70 ? '' : diag.index >= 45 ? 'mid' : 'low';
-  $('healthBox').innerHTML = '<button class="row" id="healthOpen" style="padding:0"><span class="hscore" style="width:100%"><span class="ring ' + cls + '">' + (diag.index == null ? '—' : diag.index) + '</span><span class="n"><b>财务健康指数</b><small>' + (diag.index == null ? '补上收入、支出和保额后可计算' : diag.index >= 70 ? '整体稳健，继续保持' : diag.index >= 45 ? '有几个地方要补强，点开看' : '先处理最弱的一项，点开看') + '</small></span><span class="v">›</span></span></button>' +
+  $('healthBox').innerHTML = '<button class="row" id="healthOpen" style="padding:0"><span class="hscore" style="width:100%"><span class="ring ' + cls + '">' + (diag.index == null ? '—' : diag.index) + '</span><span class="n"><b>财务健康指数' + (diag.preliminary && diag.index != null ? ' <span class="tag warn">初步</span>' : '') + '</b><small>' + (diag.index == null ? '至少要有 3 个维度的数据才能打分（现在 ' + diag.confidence + ' 个）' : '基于 ' + diag.confidence + ' / 6 个维度 · ' + (diag.index >= 70 ? '整体稳健，继续保持' : diag.index >= 45 ? '有几个地方要补强，点开看' : '先处理最弱的一项，点开看')) + '</small></span><span class="v">›</span></span></button>' +
     '<div class="dims">' + diag.dims.map(function (x) { return '<div>' + esc(x.name) + '<b>' + (x.score == null ? '—' : x.score) + '</b><div class="bar-track"><div class="bar-fill ' + (x.score != null && x.score < 45 ? 'over' : x.score != null && x.score < 70 ? 'warn' : '') + '" style="width:' + (x.score || 0) + '%"></div></div></div>'; }).join('') + '</div>';
 }
 function openHealth() {
@@ -3144,6 +3179,14 @@ document.addEventListener('click', function (e) {
   if (b) return taskAction(b.dataset.id, b.dataset.task);
   if (e.target.closest('#healthOpen')) return openHealth();
   if (e.target.id === 'homePickMethod') return openMethodCatalog();
+  if (e.target.id === 'alSave') {
+    var body = Object.assign({}, prefs(), { incomeEstimate: L.evalAmount($('alIncome').value) || 0, expenseEstimate: L.evalAmount($('alExpense').value) || 0, taxReservePct: Number($('alTax').value) || 0, cashBuffer: L.evalAmount($('alBuffer').value) || 0 });
+    if (!(body.incomeEstimate > 0)) return toast('请填每月收入估计');
+    return S.db.collection('settings').doc('prefs').set(body).then(function () { track('estimate_set'); toast('已保存，按估计值规划'); }).catch(function (x) { toast(errText(x)); });
+  }
+  if (e.target.id === 'alEdit') {
+    var p0 = Object.assign({}, prefs()); p0.incomeEstimate = 0; S.db.collection('settings').doc('prefs').set(p0); return;
+  }
 });
 $('hsSave').addEventListener('click', function () {
   var body = Object.assign({}, prefs(), { birthYear: Number($('hsBirth').value) || null, lifeCover: Number($('hsCover').value) || 0 });
@@ -3525,7 +3568,8 @@ function renderBalances() {
   $('balLiabs').innerHTML = liabs.map(item).join('') || '<li class="empty">没有家庭负债账户</li>';
   $('balBiz').innerHTML = biz.map(item).join('') || '<li class="empty">没有企业账户</li>';
   var t = L.familyTotals(S.accounts, S.balances, S.rates, m);
-  $('balHint').textContent = m + ' 月：未录入 ' + t.missing + ' 项，沿用旧值 ' + t.carried + ' 项。点击任一账户更新余额。';
+  var meInfo = window.Api && window.Api.me ? window.Api.me() : null;
+  $('balHint').textContent = m + ' 月：未录入 ' + t.missing + ' 项，沿用旧值 ' + t.carried + ' 项。点击任一账户更新余额。' + (meInfo && meInfo.hiddenPrivate ? ' 另有 ' + meInfo.hiddenPrivate + ' 个其他成员的私人账户未显示（不计入这里的总额）。' : '');
 }
 
 // ---------- entry ----------
@@ -4117,7 +4161,7 @@ function openAcc(id) {
   $('aTitle').textContent = a.name;
   $('aMeta').textContent = GROUP_LABEL[a.group] + ' · ' + KIND_LABEL[a.kind] + ' · ' + a.currency + (a.category ? ' · ' + a.category : '');
   $('aName').value = a.name; $('aCat').value = a.category || ''; $('aGroup').value = a.group || 'family'; $('aSort').value = a.sort || 0;
-  $('aPrivate').value = a.private ? 'me' : '';
+  $('aPrivate').value = a.private ? (a.auditable ? 'audit' : 'me') : '';
   $('aAmtLabel').textContent = a.currency + ' 原币余额（' + S.month + '）' + (a.kind === 'liability' ? '，负债请填正数' : '');
   $('aAmt').value = b ? b.amount : '';
   $('aAsOf').value = b && b.month === S.month ? (b.asOf || b.month + '-01') : (S.month === L.nowMonth() ? L.todayKuching() : L.dateInMonth(S.month, 31));
@@ -4176,8 +4220,9 @@ async function saveAcc() {
   var name = $('aName').value.trim(); if (!name) return toast('请输入名称');
   var body = { month: S.month, asOf: asOf, accountId: a.id, amount: val, currency: a.currency, note: $('aNote').value.trim(), byId: S.uid, updatedAt: new Date().toISOString() };
   try {
-    var meta = { name: name, category: $('aCat').value.trim(), group: $('aGroup').value, sort: Number($('aSort').value) || 0, private: $('aPrivate').value === 'me' ? (a.private || S.uid) : null };
-    if (meta.name !== a.name || meta.category !== (a.category || '') || meta.group !== a.group || meta.sort !== (a.sort || 0) || (meta.private || null) !== (a.private || null)) {
+    var pv = $('aPrivate').value;
+    var meta = { name: name, category: $('aCat').value.trim(), group: $('aGroup').value, sort: Number($('aSort').value) || 0, private: pv ? (a.private || S.uid) : null, auditable: pv === 'audit' };
+    if (meta.name !== a.name || meta.category !== (a.category || '') || meta.group !== a.group || meta.sort !== (a.sort || 0) || (meta.private || null) !== (a.private || null) || !!meta.auditable !== !!a.auditable) {
       await S.db.collection('accounts').doc(a.id).update(meta);
       audit('修改账户', a.id, a.name + ' → ' + meta.name + ' · ' + meta.category);
     }
@@ -4725,8 +4770,9 @@ $('shareBtn').addEventListener('click', shareSummary);
 $('helpBtn').addEventListener('click', function () { $('helpSheet').hidden = false; });
 $('delFamilyBtn').addEventListener('click', function () {
   if ($('delConfirm').value.trim() !== 'DELETE') return toast('请先输入 DELETE');
+  if (!$('delKey').value.trim()) return toast('请重新输入访问密钥');
   armOrRun('del-family', async function () {
-    await window.Api.call('deleteFamilyData', 'DELETE');
+    await window.Api.call('deleteFamilyData', 'DELETE', $('delKey').value.trim());
     if (window.FamilyKey) window.FamilyKey.clear();
     location.href = '/logout';
   });

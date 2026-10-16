@@ -151,7 +151,11 @@ const api = (fn, args, key) => req('POST', '/api/' + fn + (key ? '?k=' + key : '
     await api('setDoc', ['balances', '2026-10__tan-secret', { month: '2026-10', accountId: 'tan-secret', amount: 500 }], 'tanwife001');
     await api('setDoc', ['tx', 'tan-secret-tx', { type: 'expense', date: '2026-10-02', month: '2026-10', amount: 9, category: '饮食', account: 'tan-secret' }], 'tanwife001');
     const ownerView = (await api('getSnapshot', [['accounts', 'tx']], 'tankey7890')).j.result;
-    assert.ok(ownerView.accounts.some(a => a.id === 'tan-secret'), 'owner sees it');
+    assert.ok(!ownerView.accounts.some(a => a.id === 'tan-secret'), 'owner does NOT see a plain private account');
+    assert.ok(!ownerView.tx.some(t => t.id === 'tan-secret-tx'), 'nor its transactions');
+    assert.strictEqual((await api('getMe', [], 'tankey7890')).j.result.hiddenPrivate, 1, 'owner only sees the count');
+    await api('setDoc', ['accounts', 'tan-secret', { name: 'Mei Secret', kind: 'asset', group: 'family', currency: 'MYR', category: '现金与定存', private: 'Mei', auditable: true }], 'tanwife001');
+    assert.ok((await api('getSnapshot', [['accounts']], 'tankey7890')).j.result.accounts.some(a => a.id === 'tan-secret'), 'auditable private account is visible to the owner');
     await api('setDoc', ['members', 'Third', { name: 'Third' }], 'tankey7890');
     process.env.FAMILY_KEYS += ''; // (members list is not auth; a third key would be needed for a full check)
     // Simulate a non-owner, non-private-owner view: Ah Tan is owner, so use a fresh key family? Use default-family Liza vs Chen for the same rule:
@@ -160,17 +164,26 @@ const api = (fn, args, key) => req('POST', '/api/' + fn + (key ? '?k=' + key : '
     const liza = (await api('getSnapshot', [['accounts']], 'lizakey456')).j.result.accounts.map(a => a.id);
     assert.ok(liza.includes('liza-only') && !liza.includes('chen-only'), 'Liza sees her own private account, not Chen\'s');
     const chen = (await api('getSnapshot', [['accounts']], 'ownerkey123')).j.result.accounts.map(a => a.id);
-    assert.ok(chen.includes('liza-only'), 'owner sees all');
+    assert.ok(!chen.includes('liza-only') && chen.includes('chen-only'), 'owner does not see Liza\'s private account');
     assert.ok(/私人账户/.test((await api('setDoc', ['balances', '2026-10__chen-only', { month: '2026-10', accountId: 'chen-only', amount: 1 }], 'lizakey456')).j.error));
     assert.strictEqual((await api('track', ['first_tx'], 'lizakey456')).j.result, true);
     const stats = (await api('usageStats', [], 'ownerkey123')).j.result.find(f => f.family === 'default');
     assert.strictEqual(stats.events30.first_tx, 1);
     assert.ok(/运营者/.test((await api('usageStats', [], 'lizakey456')).j.error));
-    assert.ok(/DELETE/.test((await api('deleteFamilyData', ['no'], 'tankey7890')).j.error));
-    assert.ok(/只有 Ah Tan/.test((await api('deleteFamilyData', ['DELETE'], 'tanwife001')).j.error));
-    assert.strictEqual((await api('deleteFamilyData', ['DELETE'], 'tankey7890')).j.result.deleted, true);
+    assert.ok(/DELETE/.test((await api('deleteFamilyData', ['no', 'tankey7890'], 'tankey7890')).j.error));
+    assert.ok(/只有 Ah Tan/.test((await api('deleteFamilyData', ['DELETE', 'tanwife001'], 'tanwife001')).j.error));
+    assert.ok(/密钥/.test((await api('deleteFamilyData', ['DELETE', 'wrongkey'], 'tankey7890')).j.error), 'key must be re-entered');
+    const del = (await api('deleteFamilyData', ['DELETE', 'tankey7890'], 'tankey7890')).j.result;
+    assert.strictEqual(del.deleted, true); assert.strictEqual(del.recoverDays, 30);
     assert.strictEqual((await api('getSnapshot', [['accounts']], 'tankey7890')).j.result.accounts.length, 0);
     assert.ok(!fs.existsSync(path.join(dir, 'families', 'tan', 'receipts')));
+    assert.ok(fs.existsSync(path.join(dir, 'deleted', del.archived, 'accounts.json')), 'archived for recovery');
+    const listed = (await api('listDeleted', [], 'ownerkey123')).j.result;
+    assert.strictEqual(listed[0].family, 'tan');
+    const rs = (await api('restoreDeleted', [del.archived], 'ownerkey123')).j.result;
+    assert.ok(rs.restored > 0);
+    assert.ok((await api('getSnapshot', [['accounts']], 'tankey7890')).j.result.accounts.length > 0, 'restored');
+    await api('deleteFamilyData', ['DELETE', 'tankey7890'], 'tankey7890');
   });
 
   await t('plans: operator sets a family to free, limits apply, pro lifts them', async () => {
