@@ -203,6 +203,26 @@ const api = (fn, args, key) => req('POST', '/api/' + fn + (key ? '?k=' + key : '
     assert.strictEqual((await api('getMe', [], 'lizakey456')).j.result.plan.tier, 'pro', 'default family is never limited');
   });
 
+  await t('addKey: operator creates an empty isolated family or adds a member; key persists in keys.txt', async () => {
+    assert.ok(/运营者/.test((await api('addKey', ['测试', 'demo'], 'tankey7890')).j.error), 'other families cannot create keys');
+    assert.ok(/运营者/.test((await api('addKey', ['测试', 'demo'], 'lizakey456')).j.error), 'non-owner of the default family cannot either');
+    assert.ok(/家庭编号/.test((await api('addKey', ['测试', 'bad id!'], 'ownerkey123')).j.error));
+    assert.ok(/名字/.test((await api('addKey', ['a:b', 'demo'], 'ownerkey123')).j.error));
+    const r = (await api('addKey', ['测试', 'demo'], 'ownerkey123')).j.result;
+    assert.ok(r.key.length >= 20 && r.created && r.owner === '测试');
+    const me = (await api('getMe', [], r.key)).j.result;
+    assert.deepStrictEqual([me.name, me.family, me.owner, me.operator], ['测试', 'demo', true, false]);
+    const snap = (await api('getSnapshot', [['accounts', 'tx']], r.key)).j.result;
+    assert.deepStrictEqual(snap, { accounts: [], tx: [] }, 'new family starts empty');
+    const line = fs.readFileSync(path.join(dir, 'keys.txt'), 'utf8').trim().split('\n').pop();
+    assert.strictEqual(line, r.key + ':测试:demo');
+    const m = (await api('addKey', ['成员', 'demo'], 'ownerkey123')).j.result;
+    assert.ok(!m.created && m.owner === '测试');
+    assert.ok(/已有/.test((await api('addKey', ['成员', 'demo'], 'ownerkey123')).j.error));
+    const fams = (await api('listFamilies', [], 'ownerkey123')).j.result.find(f => f.family === 'demo');
+    assert.deepStrictEqual(fams.members, ['测试', '成员']);
+  });
+
   await t('wrong keys are throttled after 8 attempts, then even the right key waits', async () => {
     let last;
     for (let i = 0; i < 8; i++) last = await api('getMe', [], 'wrong' + i);

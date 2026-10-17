@@ -658,6 +658,15 @@ body.lite .nav [data-tab="ledger"]{display:none}
       <p class="muted" style="margin-top:8px">版本 <span id="buildId">__BUILD__</span><span id="planInfo"></span></p>
     </div>
 
+    <div class="panel" id="opPanel" hidden>
+      <h2>运营者 · 家庭与密钥</h2>
+      <p class="muted">新建一个家庭编号会得到一个空白、完全隔离的账本（没有任何现有资料），第一个人就是它的 owner；填已有的家庭编号则是给那个家庭加成员。生成的链接只显示一次。要用新家庭测试，请在无痕窗口打开链接，或先在这里「退出」。</p>
+      <div class="form"><label>名字<input id="opName" type="text" autocomplete="off" placeholder="例：测试"></label><label>家庭编号（英文或数字）<input id="opFamily" type="text" autocomplete="off" placeholder="例：demo"></label></div>
+      <div class="acts" style="justify-content:flex-start"><button class="btn" id="opAddBtn">生成密钥和链接</button><button class="btn" id="opListBtn">查看所有家庭</button></div>
+      <div id="opResult" class="muted" style="margin-top:8px;word-break:break-all" hidden></div>
+      <ul class="list" id="opFamilies"></ul>
+    </div>
+
     <div class="panel" id="dangerPanel" hidden>
       <h2>删除全部数据</h2>
       <p class="muted">范围：这个家庭的所有账户、余额、流水、收据、目标、任务、设置和服务器备份；其他成员下次打开会看到空账本。删除后数据在服务器保留 30 天供运营者恢复，之后彻底清除（与隐私政策一致）。只有 owner 可以操作，需要输入 DELETE 并重新输入你的访问密钥。</p>
@@ -2436,7 +2445,7 @@ body.lite .nav [data-tab="ledger"]{display:none}
       withSuccessHandler: function (f) { ok = f; return r; },
       withFailureHandler: function (f) { bad = f; return r; }
     };
-    ['getMe', 'getSnapshot', 'setDoc', 'delDoc', 'uploadReceipt', 'getReceipt', 'getSeed', 'exportAll', 'importAll', 'listBackups', 'restoreBackup', 'setPlan', 'listFamilies', 'track', 'usageStats', 'deleteFamilyData', 'listDeleted', 'restoreDeleted'].forEach(function (fn) {
+    ['getMe', 'getSnapshot', 'setDoc', 'delDoc', 'uploadReceipt', 'getReceipt', 'getSeed', 'exportAll', 'importAll', 'listBackups', 'restoreBackup', 'setPlan', 'listFamilies', 'track', 'usageStats', 'deleteFamilyData', 'listDeleted', 'restoreDeleted', 'addKey'].forEach(function (fn) {
       r[fn] = function () {
         var args = Array.prototype.slice.call(arguments);
         var s = ok, b = bad;
@@ -4414,6 +4423,7 @@ function renderSettings() {
   $('seedPanel').hidden = Object.keys(S.accounts).length > 0 || !!(meNow && meNow.family && meNow.family !== 'default');
   $('restoreLbl').hidden = !(window.Api && window.Api.isOwner());
   $('dangerPanel').hidden = !(window.Api && window.Api.isOwner());
+  $('opPanel').hidden = !(meNow && meNow.operator);
   var who = window.Api && window.Api.me ? window.Api.me() : null;
   $('planInfo').textContent = who && who.plan ? ' · ' + (who.plan.tier === 'pro' ? '完整版' : '免费版（最多 8 个账户，无收据照片）') + (who.family && who.family !== 'default' ? ' · 家庭 ' + who.family : '') : '';
   $('healthList').innerHTML = L.healthCheck({ accounts: S.accounts, balances: S.balances, tx: txArr(), recurring: recArr(), goals: arr(S.goals), categories: catList(), month: S.month })
@@ -4903,6 +4913,30 @@ $('delFamilyBtn').addEventListener('click', function () {
     location.href = '/logout';
   });
   $('delFamilyBtn').textContent = S.arm === 'del-family' ? '再点一次确认删除' : '删除本家庭全部数据';
+});
+$('opAddBtn').addEventListener('click', async function () {
+  var name = $('opName').value.trim(), fam = $('opFamily').value.trim();
+  if (!name || !fam) return toast('请填名字和家庭编号');
+  try {
+    var r = await window.Api.call('addKey', name, fam);
+    var link = location.origin + '/?k=' + encodeURIComponent(r.key);
+    $('opResult').hidden = false;
+    $('opResult').innerHTML = '<b>' + esc(r.name) + '</b>（家庭 ' + esc(r.family) + (r.created ? '，新家庭，' + esc(r.name) + ' 是 owner' : '，加入已有家庭，owner 是 ' + esc(r.owner)) + '）的链接，只显示这一次：<br><code id="opLink">' + esc(link) + '</code><br><button class="btn small" id="opCopyBtn" style="margin-top:6px">复制链接</button>';
+    $('opCopyBtn').addEventListener('click', function () {
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(function () { toast('已复制'); }).catch(function () { prompt('复制下面的链接：', link); });
+      else prompt('复制下面的链接：', link);
+    });
+    $('opName').value = ''; $('opFamily').value = '';
+    audit('新建密钥', r.name, '家庭 ' + r.family);
+  } catch (e) { toast(e && e.message && e.code !== 'unauthorized' ? e.message : errText(e)); }
+});
+$('opListBtn').addEventListener('click', async function () {
+  try {
+    var fams = await window.Api.call('listFamilies');
+    $('opFamilies').innerHTML = fams.map(function (f) {
+      return '<li class="li"><span class="n"><b>' + esc(f.family) + '</b><small>owner ' + esc(f.owner) + ' · 成员 ' + esc(f.members.join('、')) + ' · ' + f.accounts + ' 个账户 · ' + (f.plan && f.plan.tier === 'free' ? '免费版' : '完整版') + '</small></span></li>';
+    }).join('') || '<li class="li muted">没有家庭</li>';
+  } catch (e) { toast(errText(e)); }
 });
 $('srvRestoreBtn').addEventListener('click', function () {
   var day = $('srvBackupDay').value; if (!day) return;

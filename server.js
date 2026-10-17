@@ -406,6 +406,25 @@ const API = {
   listFamilies(ctx) {
     if (!ctx.operator) throw new Error('只有运营者可以查看');
     return families().map(f => ({ family: f, owner: OWNERS[f], members: Object.keys(KEYS).filter(k => KEYS[k].family === f).map(k => KEYS[k].name), plan: planOf(f), accounts: Object.keys(load(f, 'accounts')).length }));
+  },
+  // Operator only: create an access key for a person. A new family id starts an empty, isolated family whose
+  // first person is its owner; an existing family id adds a member. The key is appended to keys.txt (so it
+  // survives restarts) and becomes valid at once. Same line format as scripts/keys.sh, no SSH needed.
+  addKey(ctx, name, family) {
+    if (!ctx.operator) throw new Error('只有运营者可以新建密钥');
+    name = String(name || '').trim();
+    family = String(family || '').trim();
+    if (!name || name.length > 30 || /[:\n\r]/.test(name)) throw new Error('名字 1–30 字，不能有冒号');
+    if (!/^[A-Za-z0-9][\w-]{0,29}$/.test(family)) throw new Error('家庭编号只能用英文字母、数字、- 和 _，以字母或数字开头');
+    if (Object.keys(KEYS).some(k => KEYS[k].family === family && KEYS[k].name === name)) throw new Error('这个家庭已有 ' + name);
+    const key = crypto.randomBytes(18).toString('base64url');
+    fs.appendFileSync(KEYS_FILE, key + ':' + name + ':' + family + '\n', { mode: 0o600 });
+    try { fs.chmodSync(KEYS_FILE, 0o600); } catch (e) { /* best effort */ }
+    const created = !OWNERS[family];
+    KEYS[key] = { name, family };
+    if (created) OWNERS[family] = name;
+    console.log('[' + ctx.family + '] ' + ctx.me + ' 新建密钥：' + name + '（家庭 ' + family + (created ? '，新家庭' : '') + '）');
+    return { key, name, family, created, owner: OWNERS[family] };
   }
 };
 
