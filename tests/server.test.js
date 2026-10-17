@@ -223,6 +223,24 @@ const api = (fn, args, key) => req('POST', '/api/' + fn + (key ? '?k=' + key : '
     assert.deepStrictEqual(fams.members, ['测试', '成员']);
   });
 
+  await t('startFamily: no key needed, creates an empty family with its own key and cookie; limited per address', async () => {
+    const r1 = await req('POST', '/api/startFamily', { name: 'Ah Hock' });
+    assert.strictEqual(r1.status, 200);
+    const j1 = JSON.parse(r1.body);
+    assert.ok(j1.ok && j1.result.created && /^f[0-9a-f]{8}$/.test(j1.result.family) && j1.result.name === 'Ah Hock');
+    assert.ok(/^k=/.test(r1.headers['set-cookie'][0]) && /HttpOnly/.test(r1.headers['set-cookie'][0]), 'key handed to the phone as a cookie');
+    const me = (await api('getMe', [], j1.result.key)).j.result;
+    assert.deepStrictEqual([me.name, me.family, me.owner, me.operator], ['Ah Hock', j1.result.family, true, false]);
+    assert.deepStrictEqual((await api('getSnapshot', [['accounts']], j1.result.key)).j.result, { accounts: [] }, 'starts empty');
+    const j2 = JSON.parse((await req('POST', '/api/startFamily', { name: 'a:b' })).body);
+    assert.strictEqual(j2.result.name, 'ab', 'colon stripped (keys.txt separator)');
+    assert.strictEqual(JSON.parse((await req('POST', '/api/startFamily', {})).body).result.name, '我', 'empty name defaults');
+    assert.ok(/今天已建立/.test(JSON.parse((await req('POST', '/api/startFamily', {})).body).error), 'fourth sign-up from one address today is refused');
+    const lines = fs.readFileSync(path.join(dir, 'keys.txt'), 'utf8').trim().split('\n');
+    assert.ok(lines.some(l => l === j1.result.key + ':Ah Hock:' + j1.result.family), 'persisted');
+    assert.ok((await api('listFamilies', [], 'ownerkey123')).j.result.some(f => f.family === j1.result.family && f.owner === 'Ah Hock'));
+  });
+
   await t('wrong keys are throttled after 8 attempts, then even the right key waits', async () => {
     let last;
     for (let i = 0; i < 8; i++) last = await api('getMe', [], 'wrong' + i);

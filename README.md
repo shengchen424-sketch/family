@@ -10,6 +10,8 @@ VPS 首次部署见 `family-assets.service` 注释。
 
 ## 访问密钥
 
+- **普通人不需要知道密钥。** 打开首页点「建立我的账本」，服务器自动建一个空白家庭并把密钥存进这台手机（cookie + localStorage），之后直接打开网址就进自己的账本。换手机用「设置 → 在另一台手机打开（复制登录链接）」。这是 `POST /api/startFamily`，每个 IP 每天最多 3 个（`FAMILY_SIGNUP_PER_DAY`），总家庭数上限 300（`FAMILY_MAX_FAMILIES`），`FAMILY_OPEN_SIGNUP=0` 可关闭自助注册。
+- 密钥仍然是服务端区分家庭和成员的依据，真实家庭的数据永远只有持有那把密钥的手机能看到。下面是密钥的管理细节。
 - 密钥来源有两个，会合并：systemd 单元里的 `FAMILY_KEYS=密钥:名字,...`，以及 `data/keys.txt`（每行 `密钥:名字`，`#` 开头为注释）。
 - 名字（Chen / Liza）用来标记谁录入、谁修改；每人一把密钥。
 - 打开方式：`https://IP:8444/?k=密钥`。页面会把密钥存进 cookie，接口请求也会带上 `?k=`，手机浏览器丢 cookie 也不影响。

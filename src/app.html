@@ -280,11 +280,17 @@ body.lite .nav [data-tab="ledger"]{display:none}
   <div class="sync" id="sync" hidden><span id="syncText"></span><button type="button" id="syncBtn">刷新</button></div>
   <div id="notice" class="notice" hidden></div>
   <div id="login" class="login" hidden>
-    <h2>输入访问密钥</h2>
-    <p>每位家庭成员有自己的密钥。输入一次后这台手机会记住。</p>
-    <label>密钥<input id="loginKey" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false"></label>
-    <div class="acts" style="margin-top:12px"><button class="btn primary" id="loginBtn">进入</button></div>
+    <h2>开始使用</h2>
+    <p>不用注册、不用密码。点一下就建立你家的账本，这台手机会一直记住。</p>
+    <label>你的名字（可不填）<input id="startName" type="text" autocomplete="given-name" placeholder="例：Chen" maxlength="30"></label>
+    <div class="acts" style="margin-top:12px"><button class="btn primary" id="startBtn">建立我的账本</button></div>
     <div class="muted" id="loginHint" style="margin-top:8px"></div>
+    <details id="loginHave" style="margin-top:18px">
+      <summary class="muted">已经有账本？在别的手机上用过，或家人发了链接给你</summary>
+      <p class="muted" style="margin-top:8px">直接点家人发来的链接就能进。如果只有密钥，在这里输入：</p>
+      <label>密钥<input id="loginKey" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false"></label>
+      <div class="acts" style="margin-top:12px"><button class="btn" id="loginBtn">进入</button></div>
+    </details>
   </div>
 
   <!-- ===== 总览 ===== -->
@@ -665,7 +671,8 @@ body.lite .nav [data-tab="ledger"]{display:none}
     <div class="panel">
       <h2>安装到手机</h2>
       <p class="muted" id="installHint">Android Chrome：菜单 → “添加到主屏幕”或“安装应用”。iPhone Safari：分享 → “添加到主屏幕”。安装后像普通 App 一样打开，离线也能打开页面。</p>
-      <div class="acts" style="justify-content:flex-start"><button class="btn" id="installBtn" hidden>安装应用</button><a class="btn" id="apkLink" href="/download/apk" hidden>下载 Android 安装包（APK）</a><button class="btn" id="logoutBtn">退出（清除这台手机上的密钥）</button></div>
+      <div class="acts" style="justify-content:flex-start"><button class="btn" id="installBtn" hidden>安装应用</button><a class="btn" id="apkLink" href="/download/apk" hidden>下载 Android 安装包（APK）</a><button class="btn" id="myLinkBtn">在另一台手机打开（复制登录链接）</button><button class="btn" id="logoutBtn">退出（清除这台手机上的登录）</button></div>
+      <p class="muted">登录链接等于这台手机的身份，只发给自己或家人；换手机、重装浏览器都靠它找回账本。</p>
       <p class="muted" id="apkHint" hidden>Android 手机下载后打开安装（需允许"安装未知应用"）。这是正式上架前的测试包，与网页版数据相同。</p>
     </div>
 
@@ -1935,13 +1942,23 @@ function showLogin(msg) {
   track('open');
   $('login').hidden = false;
   $('loginHint').textContent = msg || '';
-  setTimeout(function () { $('loginKey').focus(); }, 50);
+  if (msg) { $('loginHave').open = true; setTimeout(function () { $('loginKey').focus(); }, 50); }
 }
 function doLogin() {
   var k = $('loginKey').value.trim();
   if (!k) return toast('请输入密钥');
   if (window.FamilyKey) window.FamilyKey.set(k);
   location.href = '/?k=' + encodeURIComponent(k);
+}
+async function doStart() {
+  var btn = $('startBtn'); btn.disabled = true; btn.textContent = '正在建立…';
+  try {
+    var res = await fetch('/api/startFamily', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: $('startName').value.trim() }) });
+    var j = await res.json();
+    if (!j.ok) throw new Error(j.error || '建立失败');
+    if (window.FamilyKey) window.FamilyKey.set(j.result.key);
+    location.href = '/?k=' + encodeURIComponent(j.result.key);
+  } catch (e) { toast(e.message || '网络错误，请重试'); btn.disabled = false; btn.textContent = '建立我的账本'; }
 }
 
 // ---------- balances ----------
@@ -3129,6 +3146,16 @@ $('voiceBtn').addEventListener('click', function () {
 });
 $('fCat').addEventListener('change', renderChips);
 $('loginBtn').addEventListener('click', doLogin);
+$('startBtn').addEventListener('click', doStart);
+$('startName').addEventListener('keydown', function (e) { if (e.key === 'Enter') doStart(); });
+$('myLinkBtn').addEventListener('click', function () {
+  var k = window.FamilyKey && window.FamilyKey.get();
+  if (!k) return toast('这台手机没有登录信息');
+  var link = location.origin + '/?k=' + encodeURIComponent(k);
+  if (navigator.share) return navigator.share({ title: '家庭账本登录链接', text: link }).catch(function () {});
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(link).then(function () { toast('已复制登录链接'); }).catch(function () { prompt('复制下面的链接：', link); });
+  prompt('复制下面的链接：', link);
+});
 $('loginKey').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
 $('logoutBtn').addEventListener('click', function () { if (window.FamilyKey) window.FamilyKey.clear(); location.href = '/logout'; });
 $('backupBtn').addEventListener('click', backupAll);

@@ -417,16 +417,39 @@ const API = {
     if (!name || name.length > 30 || /[:\n\r]/.test(name)) throw new Error('名字 1–30 字，不能有冒号');
     if (!/^[A-Za-z0-9][\w-]{0,29}$/.test(family)) throw new Error('家庭编号只能用英文字母、数字、- 和 _，以字母或数字开头');
     if (Object.keys(KEYS).some(k => KEYS[k].family === family && KEYS[k].name === name)) throw new Error('这个家庭已有 ' + name);
-    const key = crypto.randomBytes(18).toString('base64url');
-    fs.appendFileSync(KEYS_FILE, key + ':' + name + ':' + family + '\n', { mode: 0o600 });
-    try { fs.chmodSync(KEYS_FILE, 0o600); } catch (e) { /* best effort */ }
-    const created = !OWNERS[family];
-    KEYS[key] = { name, family };
-    if (created) OWNERS[family] = name;
-    console.log('[' + ctx.family + '] ' + ctx.me + ' 新建密钥：' + name + '（家庭 ' + family + (created ? '，新家庭' : '') + '）');
-    return { key, name, family, created, owner: OWNERS[family] };
+    const r = writeKey(name, family);
+    console.log('[' + ctx.family + '] ' + ctx.me + ' 新建密钥：' + name + '（家庭 ' + family + (r.created ? '，新家庭' : '') + '）');
+    return r;
   }
 };
+// Append "key:name:family" to keys.txt and make it valid at once. The first key of a family makes its owner.
+function writeKey(name, family) {
+  const key = crypto.randomBytes(18).toString('base64url');
+  fs.appendFileSync(KEYS_FILE, key + ':' + name + ':' + family + '\n', { mode: 0o600 });
+  try { fs.chmodSync(KEYS_FILE, 0o600); } catch (e) { /* best effort */ }
+  const created = !OWNERS[family];
+  KEYS[key] = { name, family };
+  if (created) OWNERS[family] = name;
+  return { key, name, family, created, owner: OWNERS[family] };
+}
+// Self-service sign-up (no key): a fresh empty family per call, limited per address per day and in total.
+const OPEN_SIGNUP = process.env.FAMILY_OPEN_SIGNUP !== '0';
+const SIGNUP_PER_DAY = Math.max(1, parseInt(process.env.FAMILY_SIGNUP_PER_DAY || '3', 10) || 3);
+const SIGNUP_MAX_FAMILIES = Math.max(1, parseInt(process.env.FAMILY_MAX_FAMILIES || '300', 10) || 300);
+const signups = new Map();
+function startFamily(ip, name) {
+  name = String(name || '').trim().replace(/[:\n\r]/g, '').slice(0, 30) || '我';
+  const now = Date.now();
+  const list = (signups.get(ip) || []).filter(t => now - t < 86400e3);
+  if (list.length >= SIGNUP_PER_DAY) throw new Error('这个网络今天已建立 ' + SIGNUP_PER_DAY + ' 个账本，请明天再试或向管理员要链接');
+  if (families().length >= SIGNUP_MAX_FAMILIES) throw new Error('账本数量已达上限，请向管理员要链接');
+  let family;
+  do { family = 'f' + crypto.randomBytes(4).toString('hex'); } while (OWNERS[family]);
+  list.push(now); signups.set(ip, list);
+  const r = writeKey(name, family);
+  console.log('[' + family + '] 自助注册：' + name + '（' + ip + '）');
+  return r;
+}
 
 // ---------- HTTP ----------
 function send(res, code, body, headers) {
@@ -512,6 +535,19 @@ async function handle(req, res) {
     return send(res, 200, fs.readFileSync(apk), hdr);
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/startFamily') {
+    // Open sign-up: no key needed. The server creates an empty family with its own random key and hands the
+    // key to this phone (cookie + response); the person never has to see or type it. Limited per address and
+    // in total so nobody can fill the disk. FAMILY_OPEN_SIGNUP=0 turns it off.
+    if (!OPEN_SIGNUP) return send(res, 403, JSON.stringify({ ok: false, error: '这台服务器不开放自助注册，请向管理员要链接' }), { 'Content-Type': 'application/json' });
+    try {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const r = startFamily(ip, body && body.name);
+      return send(res, 200, JSON.stringify({ ok: true, result: r }), { 'Content-Type': 'application/json', 'Set-Cookie': 'k=' + encodeURIComponent(r.key) + '; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=31536000' });
+    } catch (e) {
+      return send(res, 200, JSON.stringify({ ok: false, error: String(e && e.message || e) }), { 'Content-Type': 'application/json' });
+    }
+  }
   if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
     if (!key) return send(res, 403, JSON.stringify({ ok: false, error: '未授权', code: 'unauthorized' }), Object.assign({ 'Content-Type': 'application/json' }, req.staleCookie ? { 'Set-Cookie': CLEAR_COOKIE } : {}));
     const fn = url.pathname.slice(5);
