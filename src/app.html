@@ -148,6 +148,7 @@ button.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .tbl th:first-child,.tbl td:first-child{text-align:left}
 .tbl th{color:var(--muted);font-weight:600;font-size:12px}
 .tbl tr.tot td{font-weight:650;border-bottom:0}
+body.login-mode .view,body.login-mode .nav,body.login-mode .tabs,body.login-mode .top .ctrl,body.login-mode #subline{display:none!important}
 .login{max-width:420px;margin:40px auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px}
 .login h2{margin-bottom:6px}
 .login p{color:var(--muted);font-size:13px;margin:0 0 14px}
@@ -1941,6 +1942,7 @@ function showLogin(msg) {
   $('notice').hidden = true;
   track('open');
   $('login').hidden = false;
+  document.body.classList.add('login-mode');
   $('loginHint').textContent = msg || '';
   if (msg) { $('loginHave').open = true; setTimeout(function () { $('loginKey').focus(); }, 50); }
 }
